@@ -9,6 +9,8 @@
 *** Starting job count test.
 --- job count test: PASS
 *** Starting early exit test.
+unexpected EOF
+unexpected EOF
 --- early exit test: PASS
 *** Starting crash test.
 --- crash test: PASS

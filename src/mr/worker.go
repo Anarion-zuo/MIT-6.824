@@ -8,7 +8,7 @@ import "hash/fnv"
 // import "math/rand"
 import "os"
 import "io"
-import "time"
+// import "time"
 import "encoding/json"
 import "sort"
 
@@ -102,7 +102,7 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 		// rand.Seed(time.Now().UnixNano())
 		// n := rand.Intn(10)
 		// log.Printf("wait for %vms\n", n *100)
-		time.Sleep(time.Duration(1000) * time.Millisecond)
+		// time.Sleep(time.Duration(1000) * time.Millisecond)
 		worker.process()
 	}
 	worker.logPrintf("no more tasks, all done, exiting...\n")
