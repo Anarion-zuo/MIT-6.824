@@ -15,6 +15,7 @@ func main() {
 		go func() {
 			vote := requestVote()
 			mu.Lock()
+			// execute at the end of this function
 			defer mu.Unlock()
 			if vote {
 				count++

@@ -21,6 +21,7 @@ func main() {
 				count++
 			}
 			finished++
+			// broadcast before unlock
 			cond.Broadcast()
 		}()
 	}
