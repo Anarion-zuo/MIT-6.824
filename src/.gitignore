@@ -1,5 +1,6 @@
 *.*/
 main/mr-tmp/
+main/mr-correct-wc.txt
 mrtmp.*
 824-mrinput-*.txt
 /main/diff.out
