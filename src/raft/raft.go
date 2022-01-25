@@ -77,10 +77,6 @@ type Raft struct {
 
 	raftState *RaftState
 
-	//state int // state of this server, Candidate, Leader, Follower
-
-	//currentTerm int
-	//votedFor    int
 	log []LogEntry
 
 	commitIndex int
@@ -201,21 +197,6 @@ func (rf *Raft) checkLastApplied() {
 	}
 }
 
-// if RPC request or response contains term T > currentTerm:
-// set currentTerm = T, convert to follower
-// returns whether the state is transferred
-//func (rf *Raft) checkTerm(term int, leaderId int) bool {
-//	if term > rf.currentTerm {
-//		// must transfer state
-//		rf.logElectPrintf("RPC hears a term greater than current, transfer to follower...\n")
-//		rf.state = followerState
-//		rf.currentTerm = term
-//		rf.votedFor = leaderId
-//		return true
-//	}
-//	return false
-//}
-
 //
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
@@ -252,25 +233,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.Term = rf.raftState.currentTerm
 
 	stateBool := rf.raftState.requestVoteStateProcess(args, reply)
-
-	// this must be placed after the checkTerm
-	// or the host ignores higher term candidate RequestVote
-	// leading into a deadlock
-	//
-	// but then I do not think this is necessary
-	// partly because I evaded a failure by removing this
-	// partly that the later procedure has some thing necessary to do
-	// but the paper seems to suggest that only a candidate answers to a RequestVote RPC
-	// still, host must not ignore request vote before checking the term
-	//
-	// all in all, this should not exist
-	// looking at votedFor would have nullify its effect
-	// if not, then this must have been placed before the major stateProcess, which is wrong
-	//
-	//if !rf.raftState.isState(candidateState) {
-	//	rf.raftState.wUnlock()
-	//	return
-	//}
 
 	// proceed only when args.Term == rf.currentTerm
 
@@ -323,11 +285,11 @@ func randWaitTime(randomMax int, timeUnitMs int) time.Duration {
 	return time.Duration(unit*timeUnitMs) * time.Millisecond
 }
 
-func (rf *Raft) asyncSendRequestVote() (*[]RequestVoteReply, *[]bool) {
+func (rf *Raft) asyncSendRequestVote() {
 	rf.raftState.rLock()
 	if !rf.raftState.isState(candidateState) {
 		rf.raftState.rUnlock()
-		return nil, nil
+		return
 	}
 	args := RequestVoteArgs{
 		Term:        rf.raftState.currentTerm,
@@ -338,32 +300,26 @@ func (rf *Raft) asyncSendRequestVote() (*[]RequestVoteReply, *[]bool) {
 		LastLogTerm: 0,
 	}
 	rf.raftState.rUnlock()
-	replyArray := make([]RequestVoteReply, len(rf.peers))
 	okCount := 0
 	grantedCount := 0
 	recvedCount := 0
-	okArray := make([]bool, len(rf.peers))
 	cond := sync.NewCond(&sync.Mutex{})
-	largerTerm := false
 
 	for i := 0; i < len(rf.peers); i++ {
 		if i != rf.me {
 			// lock to prevent data race at pointers
 			cond.L.Lock()
-			go func(server int, args *RequestVoteArgs, reply *RequestVoteReply, cond *sync.Cond, recvedCount *int, okCount *int, grantedCount *int, largerTerm *bool) {
+			go func(server int, args *RequestVoteArgs, cond *sync.Cond, recvedCount *int, okCount *int, grantedCount *int) {
 				rf.logElectPrintf("sending RequestVote to %d\n", server)
+				reply := &RequestVoteReply{}
 				ok := rf.sendRequestVote(server, args, reply)
 				rf.logElectPrintf("reply from %d ok %t\n", server, ok)
 				cond.L.Lock()
 				if ok {
 					*okCount++
 					rf.raftState.wLock()
-					if reply.Term > rf.raftState.currentTerm {
-						rf.raftState.currentTerm = reply.Term
-						rf.raftState.state = followerState
-						rf.raftState.votedFor = server
+					if rf.raftState.checkTerm(reply.Term, server) {
 						rf.raftState.wUnlock()
-						*largerTerm = true
 						cond.Broadcast()
 						cond.L.Unlock()
 						return
@@ -378,44 +334,30 @@ func (rf *Raft) asyncSendRequestVote() (*[]RequestVoteReply, *[]bool) {
 					rf.logElectPrintf("early elected by major grantedCount %d, total %d\n", *grantedCount, len(rf.peers))
 					cond.Broadcast()
 				}
-				//if *grantedCount+1+(len(rf.peers)-1-*recvedCount) <= len(rf.peers)/2 {
-				//	rf.logElectPrintf("early giveup for too few votes granted %d recved %d total %d\n", *grantedCount, *recvedCount, len(rf.peers))
-				//	cond.Broadcast()
-				//}
 				if *recvedCount+1 >= len(rf.peers) {
 					cond.Broadcast()
 				}
 				cond.L.Unlock()
-			}(i, &args, &replyArray[i], cond, &recvedCount, &okCount, &grantedCount, &largerTerm)
+			}(i, &args, cond, &recvedCount, &okCount, &grantedCount)
 			cond.L.Unlock()
 		}
 	}
 
 	// join all peers
 	cond.L.Lock()
-	for recvedCount+1 < len(rf.peers) && grantedCount+1 <= len(rf.peers)/2 && !largerTerm {
+	for recvedCount+1 < len(rf.peers) && grantedCount+1 <= len(rf.peers)/2 {
 		cond.Wait()
 	}
-	if largerTerm {
-		rf.logElectPrintf("encounters a larger term while requesting votes\n")
-		cond.L.Unlock()
-		return nil, nil
-	}
-
-	//if grantedCount+1+(len(rf.peers)-1-recvedCount) <= len(rf.peers)/2 {
-	//	cond.L.Unlock()
-	//	return nil, nil
-	//}
 
 	rf.logElectPrintf("enough votes gathered...\n")
 
-	//if grantedCount+1 > (okCount+1)/2 || grantedCount+1 > len(rf.peers)/2  {
+	// do not make oneself leader when it is connected to no one
 	if (grantedCount+1 > (okCount+1)/2 && okCount != 0) || grantedCount+1 > len(rf.peers)/2 {
 		rf.logElectPrintf("got elected %d votes %d oks\n", grantedCount, okCount)
 		rf.raftState.wLock()
 		if !rf.raftState.isState(candidateState) {
 			rf.raftState.wUnlock()
-			return nil, nil
+			return
 		}
 		rf.raftState.state = leaderState
 		rf.raftState.wUnlock()
@@ -426,7 +368,7 @@ func (rf *Raft) asyncSendRequestVote() (*[]RequestVoteReply, *[]bool) {
 	// to ensure atomic access on all count variables
 	cond.L.Unlock()
 
-	return &replyArray, &okArray
+	return
 }
 
 // on conversion to candidate, start election
@@ -458,34 +400,16 @@ func (rf *Raft) doElection() {
 			break
 		}
 
-		// increment current Term
-		//rf.currentTerm++
-		// vote for self
-		//rf.votedFor = rf.me
 		rf.raftState.beforeSendRequestVote(rf.me)
 
-		//rf.mu.Unlock()
 		rf.raftState.wUnlock()
 
 		// reset election timer
 		rf.clearElectionMutex.Lock()
 		rf.clearElectionTimer = true
 		rf.clearElectionMutex.Unlock()
-		// send RequestVote RPCs to all others
-		// votedCount := 0
 
 		rf.asyncSendRequestVote()
-
-		//rf.raftState.rLock()
-		//if rf.raftState.state != candidateState {
-		//	//rf.mu.Unlock()
-		//	rf.raftState.rUnlock()
-		//	break
-		//}
-		//rf.raftState.rUnlock()
-
-		// state already determined
-		rf.logElectPrintf("all RequestVote sent and received...\n")
 	}
 }
 
@@ -592,7 +516,7 @@ func (rf *Raft) followerMain() {
 	rf.raftState.wUnlock()
 }
 
-func (rf *Raft) asyncSendAppendEntries() (*[]AppendEntriesReply, *[]bool) {
+func (rf *Raft) asyncSendAppendEntries() {
 	// lock on rf state
 	rf.raftState.rLock()
 	args := AppendEntriesArgs{
@@ -603,16 +527,15 @@ func (rf *Raft) asyncSendAppendEntries() (*[]AppendEntriesReply, *[]bool) {
 		// LeaderCommit: ,
 	}
 	rf.raftState.rUnlock()
-	replyArray := make([]AppendEntriesReply, len(rf.peers))
 	okCount := 0
 	grantedCount := 0
 	recvedCount := 0
 	largerTerm := false
-	okArray := make([]bool, len(rf.peers))
 	cond := sync.NewCond(&sync.Mutex{})
 	for i := 0; i < len(rf.peers); i++ {
 		if i != rf.me {
-			go func(server int, args *AppendEntriesArgs, reply *AppendEntriesReply, cond *sync.Cond, recvedCount *int, okCount *int, grantedCount *int, largerTerm *bool) {
+			go func(server int, args *AppendEntriesArgs, cond *sync.Cond, recvedCount *int, okCount *int, grantedCount *int, largerTerm *bool) {
+				reply := &AppendEntriesReply{}
 				// rf.logPrintf("sending AppendEntries to %d\n", server)
 				ok := rf.sendAppendEntries(server, args, reply)
 				// rf.logPrintf("reply from %d ok %t\n", server, ok)
@@ -620,11 +543,7 @@ func (rf *Raft) asyncSendAppendEntries() (*[]AppendEntriesReply, *[]bool) {
 				if ok {
 					*okCount++
 					rf.raftState.wLock()
-					if reply.Term > rf.raftState.currentTerm {
-						rf.logElectPrintf("sees a larger term %d at server %d\n", reply.Term, server)
-						rf.raftState.currentTerm = reply.Term
-						rf.raftState.state = followerState
-						rf.raftState.votedFor = server
+					if rf.raftState.checkTerm(reply.Term, server) {
 						rf.raftState.wUnlock()
 						*largerTerm = true
 						cond.Broadcast()
@@ -638,16 +557,10 @@ func (rf *Raft) asyncSendAppendEntries() (*[]AppendEntriesReply, *[]bool) {
 					cond.Broadcast()
 				}
 				cond.L.Unlock()
-			}(i, &args, &replyArray[i], cond, &recvedCount, &okCount, &grantedCount, &largerTerm)
+			}(i, &args, cond, &recvedCount, &okCount, &grantedCount, &largerTerm)
 		}
 	}
-	//cond.L.Lock()
-	//for !largerTerm && recvedCount+1 < len(rf.peers) {
-	//	cond.Wait()
-	//}
-	//cond.L.Unlock()
 	// do not have to join anyone
-	return &replyArray, &okArray
 }
 
 /**
@@ -668,7 +581,7 @@ func (rf *Raft) leaderMain() {
 		time.Sleep(time.Duration(heartBeatWaitMs) * time.Millisecond)
 		//rf.logElectPrintf("send AppendEntries to everyone...\n")
 		rf.asyncSendAppendEntries()
-		// if command received from clien:...
+		// if command received from a client:...
 		// TODO...
 
 		// if last log index >= nextIndex for a follower...
