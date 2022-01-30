@@ -1,6 +1,8 @@
 package raft
 
-import "sync"
+import (
+	"github.com/sasha-s/go-deadlock"
+)
 
 //const candidateState int = 0
 //const leaderState int = 1
@@ -11,7 +13,10 @@ type RaftState struct {
 	currentTerm int
 	votedFor    int
 
-	rwmutex sync.RWMutex
+	rf *Raft
+
+	//rwmutex sync.RWMutex
+	rwmutex deadlock.RWMutex
 }
 
 func (rs *RaftState) getState() int {
@@ -73,18 +78,23 @@ func (rs *RaftState) checkTerm(term int, leaderId int) bool {
  */
 func (rs *RaftState) requestVoteStateProcess(args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	reply.Term = rs.currentTerm
+	oldTerm := rs.currentTerm
 	if rs.checkTerm(args.Term, args.CandidateId) {
+		rs.rf.logElectPrintf("grant vote because candidate has term %d larger than mine %d\n", args.Term, oldTerm)
 		return true
 	}
-	// reply false if term < currentTerm
+	// reply false if Term < currentTerm
 	if args.Term < rs.currentTerm {
+		rs.rf.logElectPrintf("reject vote because candidate has term %d less than mine %d\n", args.Term, oldTerm)
 		return false
 	}
 	// if votedFor is null or candidateId, and candidate's log is atleast as up-to-date as receiver's log, grant vote.
 	if rs.votedFor == -1 || rs.votedFor == args.CandidateId {
 		rs.votedFor = args.CandidateId
+		rs.rf.logElectPrintf("grant vote because I have not cast my vote\n")
 		return true
 	}
+	rs.rf.logElectPrintf("reject vote because I have cast my vote for %d\n", rs.votedFor)
 	return false
 }
 
@@ -120,11 +130,12 @@ func (rs *RaftState) apendEntriesStateProcess(args *AppendEntriesArgs, reply *Ap
 *********************************
 */
 
-func MakeRaftState() *RaftState {
+func MakeRaftState(raft *Raft) *RaftState {
 	rs := &RaftState{
 		currentTerm: 0,
 		votedFor:    -1,
 		state:       followerState,
+		rf:          raft,
 	}
 	return rs
 }
