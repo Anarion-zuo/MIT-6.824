@@ -371,7 +371,8 @@ func (cfg *config) setlongreordering(longrel bool) {
 // try a few times in case re-elections are needed.
 func (cfg *config) checkOneLeader() int {
 	for iters := 0; iters < 10; iters++ {
-		ms := 450 + (rand.Int63() % 100)
+		// make this value larger to accomodate print time lag
+		ms := 1000 + (rand.Int63() % 100)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		leaders := make(map[int][]int)
@@ -498,6 +499,7 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 // if retry==false, calls Start() only once, in order
 // to simplify the early Lab 2B tests.
 func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
+	log.Println("tester: try to send a command to raft")
 	t0 := time.Now()
 	starts := 0
 	for time.Since(t0).Seconds() < 10 {
@@ -515,6 +517,7 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 				index1, _, ok := rf.Start(cmd)
 				if ok {
 					index = index1
+					log.Printf("tester: leader %d submitted command(%v)\n", starts, cmd)
 					break
 				}
 			}
@@ -522,7 +525,7 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 
 		if index != -1 {
 			// somebody claimed to be the leader and to have
-			// submitted our command; wait a while for agreement.
+			// submitted our Command; wait a while for agreement.
 			t1 := time.Now()
 			for time.Since(t1).Seconds() < 2 {
 				nd, cmd1 := cfg.nCommitted(index)
@@ -530,6 +533,7 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 					// committed
 					if cmd1 == cmd {
 						// and it was the command we submitted.
+						log.Printf("tester: successfully agreed on command(%v) index %d\n", cmd, index)
 						return index
 					}
 				}
@@ -538,7 +542,9 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 			if retry == false {
 				cfg.t.Fatalf("one(%v) failed to reach agreement", cmd)
 			}
+			log.Println("tester: failed to send command, try again")
 		} else {
+			//log.Println("tester: no leader elected yet, try again after 50ms")
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
