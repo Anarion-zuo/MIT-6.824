@@ -29,12 +29,23 @@ func (e *DefaultExecutor) executeTransfer(source SMState, trans SMTransfer) SMSt
 func (sm *StateMachine) machineLoop() {
 	for {
 		trans := <-sm.transCh
-		sm.rwmu.Lock()
-		dest := sm.transferExecutor.executeTransfer(sm.curState, trans)
-		if dest != notTransferred {
-			sm.stateWriter.writeState(dest)
+		if trans.isRW() {
+			sm.rwmu.Lock()
+			dest := sm.transferExecutor.executeTransfer(sm.curState, trans)
+			if dest != notTransferred {
+				sm.stateWriter.writeState(dest)
+			}
+			sm.rwmu.Unlock()
+		} else {
+			sm.rwmu.RLock()
+			dest := sm.transferExecutor.executeTransfer(sm.curState, trans)
+			sm.rwmu.RUnlock()
+			if dest != notTransferred {
+				sm.rwmu.Lock()
+				sm.stateWriter.writeState(dest)
+				sm.rwmu.Unlock()
+			}
 		}
-		sm.rwmu.Unlock()
 	}
 }
 
@@ -59,4 +70,5 @@ const notTransferred SMState = -1
 type SMTransfer interface {
 	transfer(source SMState) SMState
 	getName() string
+	isRW() bool
 }

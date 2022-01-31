@@ -10,6 +10,10 @@ func (trans *MajorElected) getName() string {
 	return "MajorElected"
 }
 
+func (trans *MajorElected) isRW() bool {
+	return false
+}
+
 func (rf *Raft) makeMajorElected() *MajorElected {
 	return &MajorElected{RaftStateTransfer{machine: rf.machine}}
 }

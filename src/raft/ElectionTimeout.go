@@ -47,6 +47,10 @@ func (trans *ElectionTimeout) getName() string {
 	return "ElectionTimeout"
 }
 
+func (trans *ElectionTimeout) isRW() bool {
+	return true
+}
+
 func (rf *Raft) sendJoinRequestVote(server int, voteCount *int, joinCount *int, elected *bool, cond *sync.Cond) {
 	rf.machine.rwmu.RLock()
 	args := RequestVoteArgs{

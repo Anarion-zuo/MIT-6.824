@@ -10,6 +10,10 @@ func (trans *LargerTerm) getName() string {
 	return "LargerTerm"
 }
 
+func (trans *LargerTerm) isRW() bool {
+	return true
+}
+
 func (rf *Raft) makeLargerTerm(newTerm int, newLeader int) *LargerTerm {
 	return &LargerTerm{RaftStateTransfer{rf.machine}, newTerm, newLeader}
 }
