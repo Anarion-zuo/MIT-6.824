@@ -444,7 +444,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Your initialization code here (2A, 2B, 2C).
 
 	// rand seed
-	rand.Seed(time.Now().UnixNano())
+	go func() {
+		for {
+			rand.Seed(time.Now().UnixNano())
+			randMs := 800 + rand.Int()%1000
+			time.Sleep(time.Duration(randMs) * time.Millisecond)
+		}
+	}()
 
 	rf.initStateMachine()
 	rf.electionTimer = makeTimer(electWaitMs, rf.makeElectionTimeout(), rf)
