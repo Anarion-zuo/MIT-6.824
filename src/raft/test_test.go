@@ -30,13 +30,13 @@ func TestInitialElection2A(t *testing.T) {
 	cfg.begin("Test (2A): initial election")
 
 	// is a leader elected?
-	log.Println("checking leader...")
+	fmt.Println("checking leader...")
 	cfg.checkOneLeader()
 
 	// sleep a bit to avoid racing with followers learning of the
 	// election, then check that all peers agree on the term.
 	time.Sleep(50 * time.Millisecond)
-	log.Println("checking terms...")
+	fmt.Println("checking terms...")
 	term1 := cfg.checkTerms()
 	if term1 < 1 {
 		t.Fatalf("term is %v, but should be at least 1", term1)
@@ -44,7 +44,7 @@ func TestInitialElection2A(t *testing.T) {
 
 	// does the leader+term stay the same if there is no network failure?
 	time.Sleep(2 * RaftElectionTimeout)
-	log.Println("checking terms...")
+	fmt.Println("checking terms...")
 	term2 := cfg.checkTerms()
 	if term1 != term2 {
 		fmt.Printf("warning: term changed even though there were no failures")
@@ -67,31 +67,31 @@ func TestReElection2A(t *testing.T) {
 	leader1 := cfg.checkOneLeader()
 
 	// if the leader disconnects, a new one should be elected.
-	log.Printf("tester: disconnect leader1...\n")
+	fmt.Printf("tester: disconnect leader %d\n", leader1)
 	cfg.disconnect(leader1)
 	cfg.checkOneLeader()
 
 	// if the old leader rejoins, that shouldn't
 	// disturb the new leader.
-	log.Printf("tester: connect leader %d...\n", leader1)
+	fmt.Printf("tester: reconnect leader %d...\n", leader1)
 	cfg.connect(leader1)
 	leader2 := cfg.checkOneLeader()
 
 	// if there's no quorum, no leader should
 	// be elected.
-	log.Printf("tester: disconnect leader %d along with follower %d...\n", leader2, (leader2+1)%servers)
+	fmt.Printf("tester: disconnect leader %d along with follower %d...\n", leader2, (leader2+1)%servers)
 	cfg.disconnect(leader2)
 	cfg.disconnect((leader2 + 1) % servers)
 	time.Sleep(2 * RaftElectionTimeout)
 	cfg.checkNoLeader()
 
 	// if a quorum arises, it should elect a leader.
-	log.Printf("tester: connect %d...\n", (leader2+1)%servers)
+	fmt.Printf("tester: connect %d...\n", (leader2+1)%servers)
 	cfg.connect((leader2 + 1) % servers)
 	cfg.checkOneLeader()
 
 	// re-join of last node shouldn't prevent leader from existing.
-	log.Printf("tester: connect old leader %d...\n", leader2)
+	fmt.Printf("tester: connect old leader %d...\n", leader2)
 	cfg.connect(leader2)
 	cfg.checkOneLeader()
 
@@ -113,17 +113,17 @@ func TestManyElections2A(t *testing.T) {
 		i1 := rand.Int() % servers
 		i2 := rand.Int() % servers
 		i3 := rand.Int() % servers
-		log.Printf("test iter %d: disconnect 3 hosts %d %d %d\n", ii, i1, i2, i3)
+		fmt.Printf("test iter %d: disconnect 3 hosts %d %d %d\n", ii, i1, i2, i3)
 		cfg.disconnect(i1)
 		cfg.disconnect(i2)
 		cfg.disconnect(i3)
 
 		// either the current leader should still be alive,
 		// or the remaining four should elect a new one.
-		log.Printf("test iter %d: the old leader should be alive\n", ii)
+		fmt.Printf("test iter %d: the old leader should be alive\n", ii)
 		cfg.checkOneLeader()
 
-		log.Printf("test iter %d: reconnect servers %d %d %d\n", ii, i1, i2, i3)
+		fmt.Printf("test iter %d: reconnect servers %d %d %d\n", ii, i1, i2, i3)
 		cfg.connect(i1)
 		cfg.connect(i2)
 		cfg.connect(i3)
