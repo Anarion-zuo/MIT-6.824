@@ -23,6 +23,11 @@ func (trans *MajorElected) transfer(source SMState) SMState {
 	if source != startElectionState && source != sendAEState {
 		return notTransferred
 	}
+	if source == startElectionState {
+		// init volatile
+		trans.machine.raft.print("first sendAE after elected")
+		trans.machine.raft.log.initVolatile(trans.machine.raft.peerCount())
+	}
 	trans.machine.raft.electionTimer.stop()
 	// start send AE
 	go trans.machine.raft.sendAEs()
@@ -30,6 +35,20 @@ func (trans *MajorElected) transfer(source SMState) SMState {
 	trans.machine.raft.sendAETimer.start()
 
 	return sendAEState
+}
+
+func (rf *Raft) initAEArgsLog(server int, args *AppendEntriesArgs) {
+	// If last log index ≥ nextIndex for a follower: send
+	// AppendEntries RPC with log entries starting at nextIndex
+	nextIndex := rf.log.nextIndex[server]
+	args.PrevLogIndex = nextIndex - 1
+	args.PrevLogTerm = rf.log.getEntry(args.PrevLogIndex).Term
+	args.LeaderCommit = rf.log.commitIndex
+	if rf.log.lastLogIndex() >= nextIndex {
+		args.Entries = rf.log.log[nextIndex:]
+	} else {
+		args.Entries = nil
+	}
 }
 
 func (rf *Raft) sendSingleAE(server int, joinCount *int, cond *sync.Cond) {
@@ -40,17 +59,23 @@ func (rf *Raft) sendSingleAE(server int, joinCount *int, cond *sync.Cond) {
 		LeaderId: rf.me,
 	}
 	rf.machine.rwmu.RUnlock()
+	rf.log.rwmu.RLock()
+	rf.initAEArgsLog(server, &args)
+	rf.log.rwmu.RUnlock()
 	reply := AppendEntriesReply{}
 
 	ok := rf.sendAppendEntries(server, &args, &reply)
 
 	if ok {
+		rf.log.rwmu.RLock()
 		rf.machine.rwmu.RLock()
+		rf.print("reply from follower %d success %t", server, reply.Success)
 		if reply.Term > rf.machine.currentTerm {
 			rf.machine.issueTransfer(rf.makeLargerTerm(reply.Term, server))
 		} else {
-			// TODO log state
+			rf.log.issueTransfer(rf.makeAEReplied(server, len(args.Entries), reply.Success))
 		}
+		rf.log.rwmu.RUnlock()
 		rf.machine.rwmu.RUnlock()
 	}
 	cond.L.Lock()

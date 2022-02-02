@@ -20,15 +20,11 @@ func (trans *ElectionTimeout) transfer(source SMState) SMState {
 	// check state
 	// can only transfer from follower or candidate state
 	if source != followerState && source != startElectionState {
-		trans.machine.print("not transferred from follower or candidate")
+		trans.machine.raft.print("not transferred from follower or candidate")
 		return notTransferred
 	}
-	trans.machine.print("begin election")
+	trans.machine.raft.print("begin election")
 	trans.machine.raft.electionTimer.stop()
-	// random wait to get rid of tickling deadlock
-	//randWaitMs := rand.Int() % 100
-	//trans.machine.print("random wait for %dms", randWaitMs)
-	//time.Sleep(time.Duration(randWaitMs) * time.Millisecond)
 	// On conversion to candidate, start election
 	// Increment currentTerm
 	trans.machine.currentTerm++
@@ -59,34 +55,44 @@ func (rf *Raft) sendJoinRequestVote(server int, voteCount *int, joinCount *int, 
 		// TODO log fields
 	}
 	reply := RequestVoteReply{}
-	rf.machine.print("sending RequestVote to %d", server)
+	rf.machine.raft.print("sending RequestVote to %d", server)
 	rf.machine.rwmu.RUnlock()
+	rf.log.rwmu.RLock()
+	args.LastLogIndex = rf.log.lastLogIndex()
+	args.LastLogTerm = rf.log.getEntry(args.LastLogIndex).Term
+	rf.log.rwmu.RUnlock()
 
 	ok := rf.sendRequestVote(server, &args, &reply)
 
-	cond.L.Lock()
+	rf.log.rwmu.RLock()
 	rf.machine.rwmu.RLock()
 	if ok {
 		if reply.Term > rf.machine.currentTerm {
 			rf.machine.issueTransfer(rf.makeLargerTerm(reply.Term, server))
 		} else {
-			rf.machine.print("server %d reply ok %t grant %t", server, ok, reply.VoteGranted)
+			rf.machine.raft.print("server %d reply ok %t grant %t", server, ok, reply.VoteGranted)
 			if reply.VoteGranted {
+				cond.L.Lock()
 				*voteCount++
+				cond.L.Unlock()
 			}
 			// If votes received from majority of servers: become leader
+			cond.L.Lock()
 			if *voteCount+1 > rf.peerCount()/2 {
-				rf.machine.print("got elected on %d votes from %d peers", *voteCount, rf.peerCount())
 				if !*elected {
+					rf.machine.raft.print("got elected on %d votes from %d peers", *voteCount, rf.peerCount())
 					rf.machine.issueTransfer(rf.makeMajorElected())
 					*elected = true
 				}
 			}
+			cond.L.Unlock()
 		}
 	} else {
-		rf.machine.print("server %d unreachable", server)
+		rf.machine.raft.print("server %d unreachable", server)
 	}
+	rf.log.rwmu.RUnlock()
 	rf.machine.rwmu.RUnlock()
+	cond.L.Lock()
 	*joinCount++
 	if *joinCount+1 >= rf.peerCount() {
 		cond.Broadcast()

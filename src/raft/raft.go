@@ -19,7 +19,6 @@ package raft
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
 	"time"
 
@@ -69,92 +68,23 @@ type Raft struct {
 	// state a Raft server must maintain.
 
 	machine       *RaftStateMachine
+	log           *LogStateMachine
 	electionTimer *Timer
 	sendAETimer   *Timer
+
+	printFlag bool
 }
 
 func (rf *Raft) peerCount() int {
 	return len(rf.peers)
 }
 
-type RaftStateMachine struct {
-	StateMachine
-
-	raft        *Raft
-	currentTerm int
-	votedFor    int
-
-	stateNameMap map[SMState]string
-
-	printMu   sync.Mutex
-	printFlag bool
-}
-
-func (sm *RaftStateMachine) print(format string, vars ...interface{}) {
-	if !sm.printFlag {
+func (rf *Raft) print(format string, vars ...interface{}) {
+	if !rf.printFlag {
 		return
 	}
-	sm.printMu.Lock()
 	s := fmt.Sprintf(format, vars...)
-	fmt.Printf("%d %s term %d votedFor %d | %s\n", sm.raft.me, sm.stateNameMap[sm.curState], sm.currentTerm, sm.votedFor, s)
-	sm.printMu.Unlock()
-}
-
-func (sm *RaftStateMachine) registerSingleState(state SMState, name string) {
-	if name2, ok := sm.stateNameMap[state]; ok {
-		log.Fatalf("state %d %s already in name map\n", state, name2)
-	}
-	sm.stateNameMap[state] = name
-}
-
-func (sm *RaftStateMachine) registerStates() {
-	sm.registerSingleState(startElectionState, "StartElection")
-	sm.registerSingleState(followerState, "Follower")
-	sm.registerSingleState(sendAEState, "SendAE")
-}
-
-type RaftStateWriter struct {
-	machine *RaftStateMachine
-}
-
-func (sw *RaftStateWriter) writeState(dest SMState) {
-	sw.machine.printMu.Lock()
-	sw.machine.curState = dest
-	sw.machine.printMu.Unlock()
-}
-
-type RaftTransferExecutor struct {
-	machine *RaftStateMachine
-}
-
-func (e *RaftTransferExecutor) executeTransfer(source SMState, trans SMTransfer) SMState {
-	//e.machine.print("execute %s", trans.getName())
-	nextState := trans.transfer(source)
-	return nextState
-}
-
-func (rf *Raft) initStateMachine() {
-	rf.machine = &RaftStateMachine{
-		StateMachine: StateMachine{
-			curState: followerState, // initial state
-			transCh:  make(chan SMTransfer),
-		},
-		raft:         rf,
-		currentTerm:  0,
-		votedFor:     -1,
-		stateNameMap: make(map[SMState]string),
-	}
-	rf.machine.transferExecutor = &RaftTransferExecutor{machine: rf.machine}
-	rf.machine.stateWriter = &RaftStateWriter{machine: rf.machine}
-	rf.machine.registerStates()
-}
-
-const startElectionState SMState = 900
-const followerState SMState = 901
-const sendAEState SMState = 902
-
-type RaftStateTransfer struct {
-	machine *RaftStateMachine
+	fmt.Printf("%d %s term %d votedFor %d lastLogIndex %d lastApplied %d commitIndex %d | %s\n", rf.me, rf.machine.stateNameMap[rf.machine.curState], rf.machine.currentTerm, rf.machine.votedFor, rf.log.lastLogIndex(), rf.log.lastApplied, rf.log.commitIndex, s)
 }
 
 // return currentTerm and whether this server
@@ -263,20 +193,30 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	reply.VoteGranted = false
 	reply.Term = rf.machine.currentTerm
+
+	var stateBool bool
 	if args.Term > rf.machine.currentTerm {
-		rf.machine.print("encounters larger term %d, transfer to follower, grant vote", args.Term)
+		rf.print("encounters larger term %d, transfer to follower", args.Term)
 		rf.machine.issueTransfer(rf.makeLargerTerm(args.Term, args.CandidateId))
-		reply.VoteGranted = true
-		return
+		stateBool = true
+	} else if args.Term < rf.machine.currentTerm {
+		// Reply false if term < currentTerm
+		rf.print("reject vote because candidate term %d less than mine %d", args.Term, rf.machine.currentTerm)
+		stateBool = false
+	} else if rf.machine.votedFor == -1 || rf.machine.votedFor == args.CandidateId {
+		stateBool = true
+	} else {
+		stateBool = false
 	}
-	// Reply false if term < currentTerm
-	if args.Term < rf.machine.currentTerm {
-		rf.machine.print("reject vote because candidate term %d less than mine %d", args.Term, rf.machine.currentTerm)
-		return
-	}
-	stateBool := rf.machine.votedFor == -1 || rf.machine.votedFor == args.CandidateId
 	// TODO log state
-	if stateBool {
+	logBool := rf.log.isUpToDate(args.LastLogIndex, args.LastLogTerm)
+	if !stateBool {
+		rf.print("reject vote to %d on raft state", args.CandidateId)
+	}
+	if !logBool {
+		rf.print("reject vote to %d because candidate log not as up-to-date as mine", args.CandidateId)
+	}
+	if stateBool && logBool {
 		reply.VoteGranted = true
 		rf.machine.issueTransfer(rf.makeLargerTerm(args.Term, args.CandidateId))
 	}
@@ -321,6 +261,10 @@ type AppendEntriesArgs struct {
 	LeaderId int
 
 	// TODO log fields
+	PrevLogIndex int
+	PrevLogTerm  int
+	Entries      []LogEntry
+	LeaderCommit int
 }
 
 type AppendEntriesReply struct {
@@ -339,22 +283,38 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.electionTimer.setElectionWait()
 	rf.electionTimer.start()
 
+	rf.log.rwmu.RLock()
+	defer rf.log.rwmu.RUnlock()
 	rf.machine.rwmu.RLock()
 	defer rf.machine.rwmu.RUnlock()
+
+	rf.print("AE recved from %d", args.LeaderId)
 
 	reply.Term = rf.machine.currentTerm
 
 	if args.Term > rf.machine.currentTerm {
-		rf.machine.print("encounters larger term %d, transfer to follower", args.Term)
+		rf.print("encounters larger term %d, transfer to follower", args.Term)
 		rf.machine.issueTransfer(rf.makeLargerTerm(args.Term, args.LeaderId))
-		return
+		reply.Success = true
+		//return
 	}
 	// Reply false if term < currentTerm
 	if args.Term < rf.machine.currentTerm {
-		rf.machine.print("reply false because candidate term %d less than mine %d", args.Term, rf.machine.currentTerm)
+		rf.print("reply false because leader term %d less than mine %d", args.Term, rf.machine.currentTerm)
 		return
 	}
-	// TODO log
+	// Reply false if log doesn’t contain an entry at prevLogIndex
+	// whose term matches prevLogTerm
+	if args.PrevLogIndex > rf.log.lastLogIndex() {
+		rf.print("reply false prevLogIndex %d larger than lastLogIndex %d", args.PrevLogIndex, rf.log.lastLogIndex())
+		return
+	}
+	if args.PrevLogTerm != rf.log.getEntry(args.PrevLogIndex).Term {
+		rf.print("reply false my log term %d not matched with leader log term %d", rf.log.getEntry(args.PrevLogIndex).Term, args.PrevLogTerm)
+		return
+	}
+	rf.log.issueTransfer(rf.makeNewAE(args.PrevLogIndex, &args.Entries, args.LeaderCommit))
+
 	reply.Success = true
 }
 
@@ -378,6 +338,30 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (2B).
+	rf.log.rwmu.Lock()
+	rf.machine.rwmu.RLock()
+	isLeader = rf.machine.curState == sendAEState
+	term = rf.machine.currentTerm
+	index = rf.log.lastLogIndex() + 1
+	if isLeader {
+		// This is not correct
+		// when many Start cmds come in a short period of time
+		// lastLogIndex() remains the same
+		// sending many cmds to be placed at the same index
+		//rf.log.issueTransfer(rf.makeAddNewEntry(command))
+
+		// The correct way of doing this is as following
+		// Instead of forcing all writing behavior into state machine processes
+		// the state is transferred here manually
+		// partly because log has only one state for now
+		log := rf.log
+		log.log = append(log.log, LogEntry{
+			Command: command,
+			Term:    rf.machine.currentTerm,
+		})
+	}
+	rf.machine.rwmu.RUnlock()
+	rf.log.rwmu.Unlock()
 
 	return index, term, isLeader
 }
@@ -453,6 +437,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	}()
 
 	rf.initStateMachine()
+	rf.initLogMachine(&applyCh)
 	rf.electionTimer = makeTimer(electWaitMs, rf.makeElectionTimeout(), rf)
 	rf.sendAETimer = makeTimer(sendAEWaitMs, rf.makeMajorElected(), rf)
 
@@ -460,16 +445,20 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState())
 
 	// print flag
-	rf.machine.printFlag = true
+	rf.printFlag = true
 
+	// start raft state machine
 	go func() {
 		randMs := rand.Int() % 500
 		time.Sleep(time.Duration(randMs) * time.Millisecond)
-		rf.machine.print("start election timer")
+		rf.print("start election timer")
 		rf.electionTimer.setElectionWait()
 		rf.electionTimer.start()
 		go rf.machine.machineLoop()
 	}()
+	// start raft log machine
+	//gob.Register(raft.SMState{})
+	go rf.log.machineLoop()
 
 	// start ticker goroutine to start elections
 	//go rf.ticker()

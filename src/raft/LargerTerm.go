@@ -20,7 +20,7 @@ func (rf *Raft) makeLargerTerm(newTerm int, newLeader int) *LargerTerm {
 
 func (trans *LargerTerm) transfer(source SMState) SMState {
 	// check term
-	if trans.newTerm < trans.machine.currentTerm {
+	if trans.newTerm <= trans.machine.currentTerm {
 		return notTransferred
 	}
 	trans.machine.votedFor = trans.newLeader
