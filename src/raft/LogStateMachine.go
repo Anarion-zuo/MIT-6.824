@@ -59,6 +59,31 @@ func (sm *LogStateMachine) isUpToDate(lastLogIndex int, lastLogTerm int) bool {
 	return sm.lastLogIndex() <= lastLogIndex
 }
 
+/**
+ * @return the first entry index not equal to the term of the entry at prevIndex
+ */
+func (sm *LogStateMachine) conflictPrevIndex(prevIndex int) int {
+	prevTerm := sm.getEntry(prevIndex).Term
+	for i := prevIndex; i >= 0; i-- {
+		if prevTerm != sm.getEntry(i).Term {
+			return i
+		}
+	}
+	return 0
+}
+
+/**
+ * @return the last index having given term
+ */
+func (sm *LogStateMachine) backTrackLogTerm(term int) int {
+	for i := sm.lastLogIndex(); i >= 1; i-- {
+		if sm.getEntry(i).Term == term {
+			return i
+		}
+	}
+	return 0
+}
+
 func (rf *Raft) initLogMachine(applyCh *chan ApplyMsg) {
 	rf.log = &LogStateMachine{
 		StateMachine: StateMachine{

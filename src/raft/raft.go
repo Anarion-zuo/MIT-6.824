@@ -260,7 +260,6 @@ type AppendEntriesArgs struct {
 	Term     int
 	LeaderId int
 
-	// TODO log fields
 	PrevLogIndex int
 	PrevLogTerm  int
 	Entries      []LogEntry
@@ -270,6 +269,10 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int
 	Success bool
+
+	// optimization on follower lagging too much behind
+	ConflictLogPrevIndex int
+	ConflictLogPrevTerm  int
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -306,11 +309,15 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// Reply false if log doesn’t contain an entry at prevLogIndex
 	// whose term matches prevLogTerm
 	if args.PrevLogIndex > rf.log.lastLogIndex() {
-		rf.print("reply false prevLogIndex %d larger than lastLogIndex %d", args.PrevLogIndex, rf.log.lastLogIndex())
+		reply.ConflictLogPrevIndex = rf.log.lastLogIndex()
+		reply.ConflictLogPrevTerm = rf.log.getEntry(reply.ConflictLogPrevIndex).Term
+		rf.print("reply false prevLogIndex %d larger than lastLogIndex %d, tell leader to try index %d", args.PrevLogIndex, rf.log.lastLogIndex(), reply.ConflictLogPrevIndex)
 		return
 	}
 	if args.PrevLogTerm != rf.log.getEntry(args.PrevLogIndex).Term {
-		rf.print("reply false my log term %d not matched with leader log term %d", rf.log.getEntry(args.PrevLogIndex).Term, args.PrevLogTerm)
+		reply.ConflictLogPrevIndex = rf.log.conflictPrevIndex(args.PrevLogIndex)
+		reply.ConflictLogPrevTerm = rf.log.getEntry(reply.ConflictLogPrevIndex).Term
+		rf.print("reply false my log term %d not matched with leader log term %d, tell leader to try index %d", rf.log.getEntry(args.PrevLogIndex).Term, args.PrevLogTerm, reply.ConflictLogPrevIndex)
 		return
 	}
 	rf.log.issueTransfer(rf.makeNewAE(args.PrevLogIndex, &args.Entries, args.LeaderCommit))

@@ -35,7 +35,9 @@ func (trans *NewAE) transfer(source SMState) SMState {
 	// follow it
 	trans.log.removeAfter(trans.prevLogIndex + 1)
 	// Append any new entries not already in the log
+	trans.log.raft.machine.rwmu.RLock()
 	trans.log.raft.print("appending %d entries", len(*trans.entries))
+	trans.log.raft.machine.rwmu.RUnlock()
 	trans.log.appendLog(trans.entries)
 	// If leaderCommit > commitIndex, set commitIndex =
 	// min(leaderCommit, index of last new entry)
