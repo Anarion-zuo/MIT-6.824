@@ -53,10 +53,14 @@ I use https://github.com/sasha-s/go-deadlock to avoid deadlocks. All locks must 
 
 This passes when I corrected an incorrect implementation on AppendEntries receivers.
 
+### Test Rejoin
+
+
 ### ConcurrentStarts Count
 
-These pass when RPCBytes passes.
+This passes when `Start` is handled correctly. 
 
 ### TestBackup
 
-This seems to be a bug in the test.
+- The optimization when a follower is many entries behind is not neccessary. It makes this test goes faster.
+
