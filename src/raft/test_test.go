@@ -311,11 +311,14 @@ loop:
 		}
 
 		leader := cfg.checkOneLeader()
+		fmt.Printf("tester: try to get leader %d to agree on 1\n", leader)
 		_, term, ok := cfg.rafts[leader].Start(1)
 		if !ok {
 			// leader moved on really quickly
+			fmt.Printf("tester: %d failed to be a leader, %d tries left\n", leader, 5-try-1)
 			continue
 		}
+		fmt.Printf("tester: leader %d Start returned correctly\n", leader)
 
 		iters := 5
 		var wg sync.WaitGroup
@@ -324,11 +327,14 @@ loop:
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
+				fmt.Printf("tester: Start cmd %v on leader %d\n", 100+i, leader)
 				i, term1, ok := cfg.rafts[leader].Start(100 + i)
 				if term1 != term {
+					fmt.Printf("tester: supposed leader %d term %d differs from supposed term %d\n", leader, term1, term)
 					return
 				}
 				if ok != true {
+					fmt.Printf("tester: supposed leader %d failed to be leader\n", leader)
 					return
 				}
 				is <- i
@@ -341,6 +347,7 @@ loop:
 		for j := 0; j < servers; j++ {
 			if t, _ := cfg.rafts[j].GetState(); t != term {
 				// term changed -- can't expect low RPC counts
+				fmt.Printf("tester: term changed, restart entire process\n")
 				continue loop
 			}
 		}
@@ -355,6 +362,7 @@ loop:
 					// so we can't expect all Start()s to
 					// have succeeded
 					failed = true
+					fmt.Printf("tester: peers moved on to later terms, try again, %d tries left\n", 5-try-1)
 					break
 				}
 				cmds = append(cmds, ix)
@@ -377,6 +385,7 @@ loop:
 			ok := false
 			for j := 0; j < len(cmds); j++ {
 				if cmds[j] == x {
+					fmt.Printf("tester: %d committed cmd %v\n", ii, x)
 					ok = true
 				}
 			}
@@ -406,7 +415,8 @@ func TestRejoin2B(t *testing.T) {
 	log.Println("tester: try to reach agreement on 101")
 	cfg.one(101, servers, true)
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
+		log.Printf("tester: iter %d\n", i)
 
 		// leader network failure
 		leader1 := cfg.checkOneLeader()
