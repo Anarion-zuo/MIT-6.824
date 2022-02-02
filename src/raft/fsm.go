@@ -1,60 +1,38 @@
 package raft
 
-import "sync"
+import (
+	"github.com/sasha-s/go-deadlock"
+)
 
 type StateMachine struct {
-	curState         SMState
-	transCh          chan SMTransfer
-	transferExecutor TransferExecutor
-	stateWriter      StateWriter
+	curState SMState
+	transCh  chan SMTransfer
 
-	rwmu sync.RWMutex
-}
-
-type TransferExecutor interface {
-	executeTransfer(source SMState, trans SMTransfer) SMState
-}
-
-type StateWriter interface {
-	writeState(state SMState)
-}
-
-type DefaultExecutor struct {
-}
-
-func (e *DefaultExecutor) executeTransfer(source SMState, trans SMTransfer) SMState {
-	return trans.transfer(source)
+	rwmu deadlock.RWMutex
 }
 
 func (sm *StateMachine) machineLoop() {
 	for {
 		trans := <-sm.transCh
+		//fmt.Println("sm: execute " + trans.getName())
 		if trans.isRW() {
 			sm.rwmu.Lock()
-			dest := sm.transferExecutor.executeTransfer(sm.curState, trans)
+			dest := trans.transfer(sm.curState)
 			if dest != notTransferred {
-				sm.stateWriter.writeState(dest)
+				sm.curState = dest
 			}
 			sm.rwmu.Unlock()
 		} else {
 			sm.rwmu.RLock()
-			dest := sm.transferExecutor.executeTransfer(sm.curState, trans)
+			dest := trans.transfer(sm.curState)
 			sm.rwmu.RUnlock()
 			if dest != notTransferred {
 				sm.rwmu.Lock()
-				sm.stateWriter.writeState(dest)
+				sm.curState = dest
 				sm.rwmu.Unlock()
 			}
 		}
 	}
-}
-
-type DefaultStateWriter struct {
-	machine StateMachine
-}
-
-func (sw *DefaultStateWriter) writeState(dest SMState) {
-	sw.machine.curState = dest
 }
 
 func (sm *StateMachine) issueTransfer(trans SMTransfer) {
