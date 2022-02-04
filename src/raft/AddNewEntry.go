@@ -13,7 +13,7 @@ func (trans *AddNewEntry) transfer(source SMState) SMState {
 	}
 	trans.log.raft.machine.rwmu.RLock()
 	trans.log.raft.print("add new log entry %v", trans.command)
-	trans.log.log = append(trans.log.log, LogEntry{
+	trans.log.appendLog(LogEntry{
 		Command: trans.command,
 		Term:    trans.log.raft.machine.currentTerm,
 	})

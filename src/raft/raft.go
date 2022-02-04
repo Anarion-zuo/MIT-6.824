@@ -269,10 +269,6 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int
 	Success bool
-
-	// optimization on follower lagging too much behind
-	ConflictLogPrevIndex int
-	ConflictLogPrevTerm  int
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -309,15 +305,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// Reply false if log doesn’t contain an entry at prevLogIndex
 	// whose term matches prevLogTerm
 	if args.PrevLogIndex > rf.log.lastLogIndex() {
-		reply.ConflictLogPrevIndex = rf.log.lastLogIndex()
-		reply.ConflictLogPrevTerm = rf.log.getEntry(reply.ConflictLogPrevIndex).Term
-		rf.print("reply false prevLogIndex %d larger than lastLogIndex %d, tell leader to try index %d", args.PrevLogIndex, rf.log.lastLogIndex(), reply.ConflictLogPrevIndex)
+		rf.print("reply false prevLogIndex %d larger than lastLogIndex %d", args.PrevLogIndex, rf.log.lastLogIndex())
 		return
 	}
 	if args.PrevLogTerm != rf.log.getEntry(args.PrevLogIndex).Term {
-		reply.ConflictLogPrevIndex = rf.log.conflictPrevIndex(args.PrevLogIndex)
-		reply.ConflictLogPrevTerm = rf.log.getEntry(reply.ConflictLogPrevIndex).Term
-		rf.print("reply false my log term %d not matched with leader log term %d, tell leader to try index %d", rf.log.getEntry(args.PrevLogIndex).Term, args.PrevLogTerm, reply.ConflictLogPrevIndex)
+		rf.print("reply false my log term %d not matched with leader log term %d", rf.log.getEntry(args.PrevLogIndex).Term, args.PrevLogTerm)
 		return
 	}
 	rf.log.issueTransfer(rf.makeNewAE(args.PrevLogIndex, &args.Entries, args.LeaderCommit))
@@ -362,7 +354,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		// the state is transferred here manually
 		// partly because log has only one state for now
 		log := rf.log
-		log.log = append(log.log, LogEntry{
+		log.appendLog(LogEntry{
 			Command: command,
 			Term:    rf.machine.currentTerm,
 		})
@@ -458,7 +450,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go func() {
 		randMs := rand.Int() % 500
 		time.Sleep(time.Duration(randMs) * time.Millisecond)
+
+		rf.log.rwmu.RLock()
 		rf.print("start election timer")
+		rf.log.rwmu.RUnlock()
+
 		rf.electionTimer.setElectionWait()
 		rf.electionTimer.start()
 		go rf.machine.machineLoop()

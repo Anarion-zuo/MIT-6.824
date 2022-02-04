@@ -3,12 +3,10 @@ package raft
 import "log"
 
 type AEReplied struct {
-	server            int
-	count             int
-	success           bool
-	conflictPrevTerm  int
-	conflictPrevIndex int
-	log               *LogStateMachine
+	server  int
+	count   int
+	success bool
+	log     *LogStateMachine
 }
 
 func (trans *AEReplied) getName() string {
@@ -19,14 +17,12 @@ func (trans *AEReplied) isRW() bool {
 	return true
 }
 
-func (rf *Raft) makeAEReplied(server int, count int, success bool, conflictPrevTerm int, conflictPrevIndex int) *AEReplied {
+func (rf *Raft) makeAEReplied(server int, count int, success bool) *AEReplied {
 	return &AEReplied{
-		server:            server,
-		count:             count,
-		success:           success,
-		conflictPrevTerm:  conflictPrevTerm,
-		conflictPrevIndex: conflictPrevIndex,
-		log:               rf.log,
+		server:  server,
+		count:   count,
+		success: success,
+		log:     rf.log,
 	}
 }
 
@@ -43,16 +39,16 @@ func (trans *AEReplied) doSuccess() {
 func (trans *AEReplied) doFailed() {
 	// If AppendEntries fails because of log inconsistency:
 	// decrement nextIndex and retry
-	//trans.log.nextIndex[trans.server]--
+	trans.log.nextIndex[trans.server]--
 
 	// optimized method
-	conflictPrevIndex := trans.log.backTrackLogTerm(trans.conflictPrevTerm)
-	conflictReplyIndex := trans.conflictPrevIndex
-	if conflictReplyIndex < conflictPrevIndex {
-		trans.log.nextIndex[trans.server] = conflictReplyIndex + 1
-	} else {
-		trans.log.nextIndex[trans.server] = conflictPrevIndex + 1
-	}
+	//conflictPrevIndex := trans.log.backTrackLogTerm(trans.conflictPrevTerm)
+	//conflictReplyIndex := trans.conflictPrevIndex
+	//if conflictReplyIndex < conflictPrevIndex {
+	//	trans.log.nextIndex[trans.server] = conflictReplyIndex + 1
+	//} else {
+	//	trans.log.nextIndex[trans.server] = conflictPrevIndex + 1
+	//}
 	trans.log.raft.machine.rwmu.RLock()
 	trans.log.raft.print("log rejected by %d, try again on nextIndex %d next cycle", trans.server, trans.log.nextIndex[trans.server])
 	trans.log.raft.machine.rwmu.RUnlock()

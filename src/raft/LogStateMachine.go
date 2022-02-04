@@ -29,8 +29,8 @@ type LogEntry struct {
 	Term    int
 }
 
-func (sm *LogStateMachine) appendLog(entries *[]LogEntry) {
-	sm.log = append(sm.log, *entries...)
+func (sm *LogStateMachine) appendLog(entries ...LogEntry) {
+	sm.log = append(sm.log, entries...)
 }
 
 func (sm *LogStateMachine) removeAfter(removeBegin int) {
