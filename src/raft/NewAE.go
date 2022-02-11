@@ -30,15 +30,15 @@ func (trans *NewAE) transfer(source SMState) SMState {
 	if source != logNormalState {
 		log.Fatalln("log not at normal state")
 	}
+	trans.log.raft.machine.rwmu.RLock()
+	trans.log.raft.print("appending %d entries", len(*trans.entries))
+	trans.log.raft.machine.rwmu.RUnlock()
 	// If an existing entry conflicts with a new one (same index
 	// but different terms), delete the existing entry and all that
 	// follow it
 	trans.log.removeAfter(trans.prevLogIndex + 1)
 	// Append any new entries not already in the log
-	trans.log.raft.machine.rwmu.RLock()
-	trans.log.raft.print("appending %d entries", len(*trans.entries))
 	trans.log.appendLog(*trans.entries...)
-	trans.log.raft.machine.rwmu.RUnlock()
 	// If leaderCommit > commitIndex, set commitIndex =
 	// min(leaderCommit, index of last new entry)
 	if trans.leaderCommit > trans.log.commitIndex {
