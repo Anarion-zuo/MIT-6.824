@@ -269,6 +269,11 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int
 	Success bool
+	// fast backtracking
+	// the term of the conflicting entry and the first
+	// index it stores for that term
+	ConflictPrevTerm  int
+	ConflictPrevIndex int
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -306,10 +311,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// whose term matches prevLogTerm
 	if args.PrevLogIndex > rf.log.lastLogIndex() {
 		rf.print("reply false prevLogIndex %d larger than lastLogIndex %d", args.PrevLogIndex, rf.log.lastLogIndex())
+		reply.ConflictPrevIndex = rf.log.lastLogIndex()
+		reply.ConflictPrevTerm = rf.log.getEntry(rf.log.lastLogIndex()).Term
 		return
 	}
 	if args.PrevLogTerm != rf.log.getEntry(args.PrevLogIndex).Term {
 		rf.print("reply false my log term %d not matched with leader log term %d", rf.log.getEntry(args.PrevLogIndex).Term, args.PrevLogTerm)
+		reply.ConflictPrevIndex = rf.log.conflictPrevIndex(args.PrevLogIndex)
+		reply.ConflictPrevTerm = rf.log.getEntry(reply.ConflictPrevIndex).Term
 		return
 	}
 	rf.log.issueTransfer(rf.makeNewAE(args.PrevLogIndex, &args.Entries, args.LeaderCommit))

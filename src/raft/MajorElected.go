@@ -73,7 +73,7 @@ func (rf *Raft) sendSingleAE(server int, joinCount *int, cond *sync.Cond) {
 		if reply.Term > rf.machine.currentTerm {
 			rf.machine.issueTransfer(rf.makeLargerTerm(reply.Term, server))
 		} else {
-			rf.log.issueTransfer(rf.makeAEReplied(server, len(args.Entries), reply.Success))
+			rf.log.issueTransfer(rf.makeAEReplied(server, len(args.Entries), reply.Success, reply.ConflictPrevIndex, reply.ConflictPrevTerm))
 		}
 		rf.log.rwmu.RUnlock()
 		rf.machine.rwmu.RUnlock()
