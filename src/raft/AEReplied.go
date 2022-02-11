@@ -26,15 +26,15 @@ func (rf *Raft) makeAEReplied(server int, count int, success bool, conflictPrevI
 		success:           success,
 		conflictPrevIndex: conflictPrevIndex,
 		conflictPrevTerm:  conflictPrevTerm,
-		log:               rf.log,
+		log:               rf.logMachine,
 	}
 }
 
 func (trans *AEReplied) doSuccess() {
 	// If successful: update nextIndex and matchIndex for follower
-	trans.log.raft.machine.rwmu.RLock()
+	trans.log.raft.stateMachine.rwmu.RLock()
 	trans.log.raft.print("increment %d follower nextIndex by %d", trans.server, trans.count)
-	trans.log.raft.machine.rwmu.RUnlock()
+	trans.log.raft.stateMachine.rwmu.RUnlock()
 	trans.log.nextIndex[trans.server] += trans.count
 	trans.log.matchIndex[trans.server] = trans.log.nextIndex[trans.server] - 1
 	trans.log.tryCommit()
@@ -43,14 +43,14 @@ func (trans *AEReplied) doSuccess() {
 func (trans *AEReplied) doFailed() {
 	// If AppendEntries fails because of log inconsistency:
 	// decrement nextIndex and retry
-	//trans.log.nextIndex[trans.server]--
+	//trans.logMachine.nextIndex[trans.server]--
 
 	// fast backtracking
 	trans.log.nextIndex[trans.server] = trans.conflictPrevIndex + 1
 
-	trans.log.raft.machine.rwmu.RLock()
+	trans.log.raft.stateMachine.rwmu.RLock()
 	trans.log.raft.print("log rejected by %d, try again on nextIndex %d next cycle", trans.server, trans.log.nextIndex[trans.server])
-	trans.log.raft.machine.rwmu.RUnlock()
+	trans.log.raft.stateMachine.rwmu.RUnlock()
 
 }
 
@@ -63,9 +63,9 @@ func (trans *AEReplied) transfer(source SMState) SMState {
 	} else {
 		trans.doFailed()
 	}
-	trans.log.raft.machine.rwmu.RLock()
+	trans.log.raft.stateMachine.rwmu.RLock()
 	trans.log.raft.print("nextIndex %v", trans.log.nextIndex)
-	trans.log.raft.machine.rwmu.RUnlock()
+	trans.log.raft.stateMachine.rwmu.RUnlock()
 	return notTransferred
 }
 
@@ -75,8 +75,8 @@ func (sm *LogStateMachine) tryCommit() {
 		return
 	}
 
-	sm.raft.machine.rwmu.RLock()
-	defer sm.raft.machine.rwmu.RUnlock()
+	sm.raft.stateMachine.rwmu.RLock()
+	defer sm.raft.stateMachine.rwmu.RUnlock()
 
 	oldCommit := sm.commitIndex
 
@@ -86,7 +86,7 @@ func (sm *LogStateMachine) tryCommit() {
 			if i == sm.raft.me {
 				continue
 			}
-			if sm.matchIndex[i] >= Ntemp && sm.getEntry(Ntemp).Term == sm.raft.machine.currentTerm {
+			if sm.matchIndex[i] >= Ntemp && sm.getEntry(Ntemp).Term == sm.raft.stateMachine.currentTerm {
 				agreeCount++
 			}
 		}

@@ -67,8 +67,8 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
-	machine       *RaftStateMachine
-	log           *LogStateMachine
+	stateMachine  *RaftStateMachine
+	logMachine    *LogStateMachine
 	electionTimer *Timer
 	sendAETimer   *Timer
 
@@ -84,7 +84,7 @@ func (rf *Raft) print(format string, vars ...interface{}) {
 		return
 	}
 	s := fmt.Sprintf(format, vars...)
-	fmt.Printf("%d %s term %d votedFor %d lastLogIndex %d lastApplied %d commitIndex %d | %s\n", rf.me, rf.machine.stateNameMap[rf.machine.curState], rf.machine.currentTerm, rf.machine.votedFor, rf.log.lastLogIndex(), rf.log.lastApplied, rf.log.commitIndex, s)
+	fmt.Printf("%d %s term %d votedFor %d lastLogIndex %d lastApplied %d commitIndex %d | %s\n", rf.me, rf.stateMachine.stateNameMap[rf.stateMachine.curState], rf.stateMachine.currentTerm, rf.stateMachine.votedFor, rf.logMachine.lastLogIndex(), rf.logMachine.lastApplied, rf.logMachine.commitIndex, s)
 }
 
 // return currentTerm and whether this server
@@ -94,12 +94,12 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (2A).
-	//rf.machine.lockState()
-	rf.machine.rwmu.RLock()
-	term = rf.machine.currentTerm
-	isleader = rf.machine.curState == sendAEState
-	rf.machine.rwmu.RUnlock()
-	//rf.machine.unlockState()
+	//rf.stateMachine.lockState()
+	rf.stateMachine.rwmu.RLock()
+	term = rf.stateMachine.currentTerm
+	isleader = rf.stateMachine.curState == sendAEState
+	rf.stateMachine.rwmu.RUnlock()
+	//rf.stateMachine.unlockState()
 	return term, isleader
 }
 
@@ -188,28 +188,28 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
-	rf.machine.rwmu.RLock()
-	defer rf.machine.rwmu.RUnlock()
+	rf.stateMachine.rwmu.RLock()
+	defer rf.stateMachine.rwmu.RUnlock()
 
 	reply.VoteGranted = false
-	reply.Term = rf.machine.currentTerm
+	reply.Term = rf.stateMachine.currentTerm
 
 	var stateBool bool
-	if args.Term > rf.machine.currentTerm {
+	if args.Term > rf.stateMachine.currentTerm {
 		rf.print("encounters larger term %d, transfer to follower", args.Term)
-		rf.machine.issueTransfer(rf.makeLargerTerm(args.Term, args.CandidateId))
+		rf.stateMachine.issueTransfer(rf.makeLargerTerm(args.Term, args.CandidateId))
 		stateBool = true
-	} else if args.Term < rf.machine.currentTerm {
+	} else if args.Term < rf.stateMachine.currentTerm {
 		// Reply false if term < currentTerm
-		rf.print("reject vote because candidate term %d less than mine %d", args.Term, rf.machine.currentTerm)
+		rf.print("reject vote because candidate term %d less than mine %d", args.Term, rf.stateMachine.currentTerm)
 		stateBool = false
-	} else if rf.machine.votedFor == -1 || rf.machine.votedFor == args.CandidateId {
+	} else if rf.stateMachine.votedFor == -1 || rf.stateMachine.votedFor == args.CandidateId {
 		stateBool = true
 	} else {
 		stateBool = false
 	}
 	// TODO log state
-	logBool := rf.log.isUpToDate(args.LastLogIndex, args.LastLogTerm)
+	logBool := rf.logMachine.isUpToDate(args.LastLogIndex, args.LastLogTerm)
 	if !stateBool {
 		rf.print("reject vote to %d on raft state", args.CandidateId)
 	}
@@ -218,7 +218,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 	if stateBool && logBool {
 		reply.VoteGranted = true
-		rf.machine.issueTransfer(rf.makeLargerTerm(args.Term, args.CandidateId))
+		rf.stateMachine.issueTransfer(rf.makeLargerTerm(args.Term, args.CandidateId))
 	}
 }
 
@@ -282,46 +282,46 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	//rf.machine.print("AppendEntries call from %d", args.LeaderId)
+	//rf.stateMachine.print("AppendEntries call from %d", args.LeaderId)
 	reply.Success = false
 	rf.electionTimer.setElectionWait()
 	rf.electionTimer.start()
 
-	rf.log.rwmu.RLock()
-	defer rf.log.rwmu.RUnlock()
-	rf.machine.rwmu.RLock()
-	defer rf.machine.rwmu.RUnlock()
+	rf.logMachine.rwmu.RLock()
+	defer rf.logMachine.rwmu.RUnlock()
+	rf.stateMachine.rwmu.RLock()
+	defer rf.stateMachine.rwmu.RUnlock()
 
 	rf.print("AE recved from %d", args.LeaderId)
 
-	reply.Term = rf.machine.currentTerm
+	reply.Term = rf.stateMachine.currentTerm
 
-	if args.Term > rf.machine.currentTerm {
+	if args.Term > rf.stateMachine.currentTerm {
 		rf.print("encounters larger term %d, transfer to follower", args.Term)
-		rf.machine.issueTransfer(rf.makeLargerTerm(args.Term, args.LeaderId))
+		rf.stateMachine.issueTransfer(rf.makeLargerTerm(args.Term, args.LeaderId))
 		reply.Success = true
 		//return
 	}
 	// Reply false if term < currentTerm
-	if args.Term < rf.machine.currentTerm {
-		rf.print("reply false because leader term %d less than mine %d", args.Term, rf.machine.currentTerm)
+	if args.Term < rf.stateMachine.currentTerm {
+		rf.print("reply false because leader term %d less than mine %d", args.Term, rf.stateMachine.currentTerm)
 		return
 	}
 	// Reply false if log doesn’t contain an entry at prevLogIndex
 	// whose term matches prevLogTerm
-	if args.PrevLogIndex > rf.log.lastLogIndex() {
-		rf.print("reply false prevLogIndex %d larger than lastLogIndex %d", args.PrevLogIndex, rf.log.lastLogIndex())
-		reply.ConflictPrevIndex = rf.log.lastLogIndex()
-		reply.ConflictPrevTerm = rf.log.getEntry(rf.log.lastLogIndex()).Term
+	if args.PrevLogIndex > rf.logMachine.lastLogIndex() {
+		rf.print("reply false prevLogIndex %d larger than lastLogIndex %d", args.PrevLogIndex, rf.logMachine.lastLogIndex())
+		reply.ConflictPrevIndex = rf.logMachine.lastLogIndex()
+		reply.ConflictPrevTerm = rf.logMachine.getEntry(rf.logMachine.lastLogIndex()).Term
 		return
 	}
-	if args.PrevLogTerm != rf.log.getEntry(args.PrevLogIndex).Term {
-		rf.print("reply false my log term %d not matched with leader log term %d", rf.log.getEntry(args.PrevLogIndex).Term, args.PrevLogTerm)
-		reply.ConflictPrevIndex = rf.log.conflictPrevIndex(args.PrevLogIndex)
-		reply.ConflictPrevTerm = rf.log.getEntry(reply.ConflictPrevIndex).Term
+	if args.PrevLogTerm != rf.logMachine.getEntry(args.PrevLogIndex).Term {
+		rf.print("reply false my log term %d not matched with leader log term %d", rf.logMachine.getEntry(args.PrevLogIndex).Term, args.PrevLogTerm)
+		reply.ConflictPrevIndex = rf.logMachine.conflictPrevIndex(args.PrevLogIndex)
+		reply.ConflictPrevTerm = rf.logMachine.getEntry(reply.ConflictPrevIndex).Term
 		return
 	}
-	rf.log.issueTransfer(rf.makeNewAE(args.PrevLogIndex, &args.Entries, args.LeaderCommit))
+	rf.logMachine.issueTransfer(rf.makeNewAE(args.PrevLogIndex, &args.Entries, args.LeaderCommit))
 
 	reply.Success = true
 }
@@ -346,30 +346,30 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (2B).
-	rf.log.rwmu.Lock()
-	rf.machine.rwmu.RLock()
-	isLeader = rf.machine.curState == sendAEState
-	term = rf.machine.currentTerm
-	index = rf.log.lastLogIndex() + 1
+	rf.logMachine.rwmu.Lock()
+	rf.stateMachine.rwmu.RLock()
+	isLeader = rf.stateMachine.curState == sendAEState
+	term = rf.stateMachine.currentTerm
+	index = rf.logMachine.lastLogIndex() + 1
 	if isLeader {
 		// This is not correct
 		// when many Start cmds come in a short period of time
 		// lastLogIndex() remains the same
 		// sending many cmds to be placed at the same index
-		//rf.log.issueTransfer(rf.makeAddNewEntry(command))
+		//rf.logMachine.issueTransfer(rf.makeAddNewEntry(command))
 
 		// The correct way of doing this is as following
-		// Instead of forcing all writing behavior into state machine processes
+		// Instead of forcing all writing behavior into state stateMachine processes
 		// the state is transferred here manually
 		// partly because log has only one state for now
-		log := rf.log
+		log := rf.logMachine
 		log.appendLog(LogEntry{
 			Command: command,
-			Term:    rf.machine.currentTerm,
+			Term:    rf.stateMachine.currentTerm,
 		})
 	}
-	rf.machine.rwmu.RUnlock()
-	rf.log.rwmu.Unlock()
+	rf.stateMachine.rwmu.RUnlock()
+	rf.logMachine.rwmu.Unlock()
 
 	return index, term, isLeader
 }
@@ -455,22 +455,22 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// print flag
 	rf.printFlag = true
 
-	// start raft state machine
+	// start raft state stateMachine
 	go func() {
 		randMs := rand.Int() % 500
 		time.Sleep(time.Duration(randMs) * time.Millisecond)
 
-		rf.log.rwmu.RLock()
+		rf.logMachine.rwmu.RLock()
 		rf.print("start election timer")
-		rf.log.rwmu.RUnlock()
+		rf.logMachine.rwmu.RUnlock()
 
 		rf.electionTimer.setElectionWait()
 		rf.electionTimer.start()
-		go rf.machine.machineLoop()
+		go rf.stateMachine.machineLoop()
 	}()
-	// start raft log machine
+	// start raft log stateMachine
 	//gob.Register(raft.SMState{})
-	go rf.log.machineLoop()
+	go rf.logMachine.machineLoop()
 
 	// start ticker goroutine to start elections
 	//go rf.ticker()

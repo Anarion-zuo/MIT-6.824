@@ -8,9 +8,9 @@ type ApplyNew struct {
 
 func (sm *LogStateMachine) tryApplyRoutine(entries *[]LogEntry, begin int) {
 	for i, entry := range *entries {
-		//sm.raft.machine.rwmu.RLock()
+		//sm.raft.stateMachine.rwmu.RLock()
 		//sm.raft.print("applying command %v", entry.Command)
-		//sm.raft.machine.rwmu.RUnlock()
+		//sm.raft.stateMachine.rwmu.RUnlock()
 		*sm.applyCh <- ApplyMsg{
 			CommandValid: true,
 			Command:      entry.Command,
@@ -49,6 +49,6 @@ func (trans *ApplyNew) isRW() bool {
 
 func (rf *Raft) makeApplyNew() *ApplyNew {
 	return &ApplyNew{
-		log: rf.log,
+		log: rf.logMachine,
 	}
 }

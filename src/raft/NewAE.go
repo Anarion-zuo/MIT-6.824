@@ -22,7 +22,7 @@ func (rf *Raft) makeNewAE(prevLogIndex int, entries *[]LogEntry, leaderCommit in
 		prevLogIndex: prevLogIndex,
 		entries:      entries,
 		leaderCommit: leaderCommit,
-		log:          rf.log,
+		log:          rf.logMachine,
 	}
 }
 
@@ -30,9 +30,9 @@ func (trans *NewAE) transfer(source SMState) SMState {
 	if source != logNormalState {
 		log.Fatalln("log not at normal state")
 	}
-	trans.log.raft.machine.rwmu.RLock()
+	trans.log.raft.stateMachine.rwmu.RLock()
 	trans.log.raft.print("appending %d entries", len(*trans.entries))
-	trans.log.raft.machine.rwmu.RUnlock()
+	trans.log.raft.stateMachine.rwmu.RUnlock()
 	// If an existing entry conflicts with a new one (same index
 	// but different terms), delete the existing entry and all that
 	// follow it
@@ -42,9 +42,9 @@ func (trans *NewAE) transfer(source SMState) SMState {
 	// If leaderCommit > commitIndex, set commitIndex =
 	// min(leaderCommit, index of last new entry)
 	if trans.leaderCommit > trans.log.commitIndex {
-		trans.log.raft.machine.rwmu.RLock()
+		trans.log.raft.stateMachine.rwmu.RLock()
 		trans.log.raft.print("leader commit %d larger than mine %d", trans.leaderCommit, trans.log.commitIndex)
-		trans.log.raft.machine.rwmu.RUnlock()
+		trans.log.raft.stateMachine.rwmu.RUnlock()
 		trans.log.commitIndex = trans.log.lastLogIndex()
 		if trans.leaderCommit < trans.log.lastLogIndex() {
 			trans.log.commitIndex = trans.leaderCommit

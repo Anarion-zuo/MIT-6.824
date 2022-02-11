@@ -63,9 +63,9 @@ func (sm *LogStateMachine) appendLogAtIndex(index int, entries ...LogEntry) {
 			// replace from this point on with elements in array entries
 			sm.removeAfter(firstDiffIndex)
 			sm.appendLog(entries[firstDiffIndex:]...)
-			sm.raft.machine.rwmu.RLock()
+			sm.raft.stateMachine.rwmu.RLock()
 			sm.raft.print("%d new entries appended at conflict index %d", len(entries)-firstDiffIndex, firstDiffIndex+index)
-			sm.raft.machine.rwmu.RUnlock()
+			sm.raft.stateMachine.rwmu.RUnlock()
 			break
 		}
 	}
@@ -75,16 +75,16 @@ func (sm *LogStateMachine) appendLogAtIndex(index int, entries ...LogEntry) {
 		// there is no conflict
 		// perhaps the log is too long
 		if sm.lastLogIndex() > index+len(entries) {
-			sm.raft.machine.rwmu.RLock()
+			sm.raft.stateMachine.rwmu.RLock()
 			sm.raft.print("discard entries after index %d", index+len(entries))
-			sm.raft.machine.rwmu.RUnlock()
+			sm.raft.stateMachine.rwmu.RUnlock()
 			sm.removeAfter(index + len(entries))
 		}
 		// perhaps the log is too short
 		if sm.lastLogIndex() < index+len(entries) {
-			sm.raft.machine.rwmu.RLock()
+			sm.raft.stateMachine.rwmu.RLock()
 			sm.raft.print("append %d new entries", index+len(entries)-sm.lastLogIndex())
-			sm.raft.machine.rwmu.RUnlock()
+			sm.raft.stateMachine.rwmu.RUnlock()
 			sm.appendLog(entries[sm.lastLogIndex()+1-index:]...)
 		}
 	}
@@ -130,7 +130,7 @@ func (sm *LogStateMachine) backTrackLogTerm(term int) int {
 }
 
 func (rf *Raft) initLogMachine(applyCh *chan ApplyMsg) {
-	rf.log = &LogStateMachine{
+	rf.logMachine = &LogStateMachine{
 		StateMachine: StateMachine{
 			curState: logNormalState,
 			transCh:  make(chan SMTransfer),

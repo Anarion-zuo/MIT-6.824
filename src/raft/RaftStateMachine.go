@@ -40,13 +40,13 @@ type RaftTransferExecutor struct {
 }
 
 func (e *RaftTransferExecutor) executeTransfer(source SMState, trans SMTransfer) SMState {
-	//e.machine.print("execute %s", trans.getName())
+	//e.stateMachine.print("execute %s", trans.getName())
 	nextState := trans.transfer(source)
 	return nextState
 }
 
 func (rf *Raft) initStateMachine() {
-	rf.machine = &RaftStateMachine{
+	rf.stateMachine = &RaftStateMachine{
 		StateMachine: StateMachine{
 			curState: followerState, // initial state
 			transCh:  make(chan SMTransfer),
@@ -56,7 +56,7 @@ func (rf *Raft) initStateMachine() {
 		votedFor:     -1,
 		stateNameMap: make(map[SMState]string),
 	}
-	rf.machine.registerStates()
+	rf.stateMachine.registerStates()
 }
 
 const startElectionState SMState = 900

@@ -11,7 +11,7 @@ type ElectionTimeout struct {
 func (rf *Raft) makeElectionTimeout() *ElectionTimeout {
 	return &ElectionTimeout{
 		RaftStateTransfer{
-			machine: rf.machine,
+			machine: rf.stateMachine,
 		},
 	}
 }
@@ -48,29 +48,29 @@ func (trans *ElectionTimeout) isRW() bool {
 }
 
 func (rf *Raft) sendJoinRequestVote(server int, voteCount *int, joinCount *int, elected *bool, cond *sync.Cond) {
-	rf.machine.rwmu.RLock()
+	rf.stateMachine.rwmu.RLock()
 	args := RequestVoteArgs{
-		Term:        rf.machine.currentTerm,
+		Term:        rf.stateMachine.currentTerm,
 		CandidateId: rf.me,
 		// TODO log fields
 	}
 	reply := RequestVoteReply{}
-	rf.machine.raft.print("sending RequestVote to %d", server)
-	rf.machine.rwmu.RUnlock()
-	rf.log.rwmu.RLock()
-	args.LastLogIndex = rf.log.lastLogIndex()
-	args.LastLogTerm = rf.log.getEntry(args.LastLogIndex).Term
-	rf.log.rwmu.RUnlock()
+	rf.stateMachine.raft.print("sending RequestVote to %d", server)
+	rf.stateMachine.rwmu.RUnlock()
+	rf.logMachine.rwmu.RLock()
+	args.LastLogIndex = rf.logMachine.lastLogIndex()
+	args.LastLogTerm = rf.logMachine.getEntry(args.LastLogIndex).Term
+	rf.logMachine.rwmu.RUnlock()
 
 	ok := rf.sendRequestVote(server, &args, &reply)
 
-	rf.log.rwmu.RLock()
-	rf.machine.rwmu.RLock()
+	rf.logMachine.rwmu.RLock()
+	rf.stateMachine.rwmu.RLock()
 	if ok {
-		if reply.Term > rf.machine.currentTerm {
-			rf.machine.issueTransfer(rf.makeLargerTerm(reply.Term, server))
+		if reply.Term > rf.stateMachine.currentTerm {
+			rf.stateMachine.issueTransfer(rf.makeLargerTerm(reply.Term, server))
 		} else {
-			rf.machine.raft.print("server %d reply ok %t grant %t", server, ok, reply.VoteGranted)
+			rf.stateMachine.raft.print("server %d reply ok %t grant %t", server, ok, reply.VoteGranted)
 			if reply.VoteGranted {
 				cond.L.Lock()
 				*voteCount++
@@ -80,18 +80,18 @@ func (rf *Raft) sendJoinRequestVote(server int, voteCount *int, joinCount *int, 
 			cond.L.Lock()
 			if *voteCount+1 > rf.peerCount()/2 {
 				if !*elected {
-					rf.machine.raft.print("got elected on %d votes from %d peers", *voteCount, rf.peerCount())
-					rf.machine.issueTransfer(rf.makeMajorElected())
+					rf.stateMachine.raft.print("got elected on %d votes from %d peers", *voteCount, rf.peerCount())
+					rf.stateMachine.issueTransfer(rf.makeMajorElected())
 					*elected = true
 				}
 			}
 			cond.L.Unlock()
 		}
 	} else {
-		rf.machine.raft.print("server %d unreachable", server)
+		rf.stateMachine.raft.print("server %d unreachable", server)
 	}
-	rf.log.rwmu.RUnlock()
-	rf.machine.rwmu.RUnlock()
+	rf.logMachine.rwmu.RUnlock()
+	rf.stateMachine.rwmu.RUnlock()
 	cond.L.Lock()
 	*joinCount++
 	if *joinCount+1 >= rf.peerCount() {

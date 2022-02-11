@@ -31,7 +31,7 @@ func makeTimer(waitMs int, command SMTransfer, rf *Raft) *Timer {
 		timer.stop()
 		for {
 			<-timer.timer1.C
-			timer.raft.machine.issueTransfer(timer.command)
+			timer.raft.stateMachine.issueTransfer(timer.command)
 			timer.start()
 		}
 	}(timer)

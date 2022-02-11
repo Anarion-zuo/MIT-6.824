@@ -15,7 +15,7 @@ func (trans *LargerTerm) isRW() bool {
 }
 
 func (rf *Raft) makeLargerTerm(newTerm int, newLeader int) *LargerTerm {
-	return &LargerTerm{RaftStateTransfer{rf.machine}, newTerm, newLeader}
+	return &LargerTerm{RaftStateTransfer{rf.stateMachine}, newTerm, newLeader}
 }
 
 func (trans *LargerTerm) transfer(source SMState) SMState {
