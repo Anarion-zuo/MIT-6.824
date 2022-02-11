@@ -46,6 +46,51 @@ func (sm *LogStateMachine) getEntry(index int) LogEntry {
 }
 
 /**
+ * @param index: the first entry in entries should be appended here
+ */
+func (sm *LogStateMachine) appendLogAtIndex(index int, entries ...LogEntry) {
+	firstDiffIndex := -1
+	compareLastIndex := sm.lastLogIndex() - index
+	if compareLastIndex > len(entries)-1 {
+		compareLastIndex = len(entries) - 1
+	}
+
+	for i := 0; i <= compareLastIndex; i++ {
+		newEntry := entries[i]
+		oldEntry := sm.getEntry(index + i)
+		if !(newEntry.Command == oldEntry.Command && newEntry.Term == oldEntry.Term) {
+			firstDiffIndex = i
+			// replace from this point on with elements in array entries
+			sm.removeAfter(firstDiffIndex)
+			sm.appendLog(entries[firstDiffIndex:]...)
+			sm.raft.machine.rwmu.RLock()
+			sm.raft.print("%d new entries appended at conflict index %d", len(entries)-firstDiffIndex, firstDiffIndex+index)
+			sm.raft.machine.rwmu.RUnlock()
+			break
+		}
+	}
+	if firstDiffIndex != -1 {
+		// there is a conflict
+	} else {
+		// there is no conflict
+		// perhaps the log is too long
+		if sm.lastLogIndex() > index+len(entries) {
+			sm.raft.machine.rwmu.RLock()
+			sm.raft.print("discard entries after index %d", index+len(entries))
+			sm.raft.machine.rwmu.RUnlock()
+			sm.removeAfter(index + len(entries))
+		}
+		// perhaps the log is too short
+		if sm.lastLogIndex() < index+len(entries) {
+			sm.raft.machine.rwmu.RLock()
+			sm.raft.print("append %d new entries", index+len(entries)-sm.lastLogIndex())
+			sm.raft.machine.rwmu.RUnlock()
+			sm.appendLog(entries[sm.lastLogIndex()+1-index:]...)
+		}
+	}
+}
+
+/**
  * @return whether this log state is at least as up-to-date as mine
  */
 func (sm *LogStateMachine) isUpToDate(lastLogIndex int, lastLogTerm int) bool {
