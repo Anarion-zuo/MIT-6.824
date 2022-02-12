@@ -26,7 +26,7 @@ func (trans *MajorElected) transfer(source SMState) SMState {
 	if source == startElectionState {
 		// init volatile
 		trans.machine.raft.print("first sendAE after elected")
-		trans.machine.raft.logMachine.initVolatile(trans.machine.raft.peerCount())
+		trans.machine.raft.stateMachine.initVolatile(trans.machine.raft.peerCount())
 	}
 	trans.machine.raft.electionTimer.stop()
 	// start send AE
@@ -34,18 +34,20 @@ func (trans *MajorElected) transfer(source SMState) SMState {
 	// set timer
 	trans.machine.raft.sendAETimer.start()
 
+	trans.machine.raft.persist()
+
 	return sendAEState
 }
 
 func (rf *Raft) initAEArgsLog(server int, args *AppendEntriesArgs) {
 	// If last log index ≥ nextIndex for a follower: send
 	// AppendEntries RPC with log entries starting at nextIndex
-	nextIndex := rf.logMachine.nextIndex[server]
+	nextIndex := rf.stateMachine.nextIndex[server]
 	args.PrevLogIndex = nextIndex - 1
-	args.PrevLogTerm = rf.logMachine.getEntry(args.PrevLogIndex).Term
-	args.LeaderCommit = rf.logMachine.commitIndex
-	if rf.logMachine.lastLogIndex() >= nextIndex {
-		args.Entries = rf.logMachine.log[nextIndex:]
+	args.PrevLogTerm = rf.stateMachine.getEntry(args.PrevLogIndex).Term
+	args.LeaderCommit = rf.stateMachine.commitIndex
+	if rf.stateMachine.lastLogIndex() >= nextIndex {
+		args.Entries = rf.stateMachine.log[nextIndex:]
 	} else {
 		args.Entries = nil
 	}
@@ -53,29 +55,25 @@ func (rf *Raft) initAEArgsLog(server int, args *AppendEntriesArgs) {
 
 func (rf *Raft) sendSingleAE(server int, joinCount *int, cond *sync.Cond) {
 	rf.stateMachine.rwmu.RLock()
-	//rf.stateMachine.print("sending AE to %d", server)
 	args := AppendEntriesArgs{
 		Term:     rf.stateMachine.currentTerm,
 		LeaderId: rf.me,
 	}
-	rf.stateMachine.rwmu.RUnlock()
-	rf.logMachine.rwmu.RLock()
 	rf.initAEArgsLog(server, &args)
-	rf.logMachine.rwmu.RUnlock()
+	rf.print("sending to server %d %d entries", server, len(args.Entries))
+	rf.stateMachine.rwmu.RUnlock()
 	reply := AppendEntriesReply{}
 
 	ok := rf.sendAppendEntries(server, &args, &reply)
 
 	if ok {
-		rf.logMachine.rwmu.RLock()
 		rf.stateMachine.rwmu.RLock()
 		rf.print("reply from follower %d success %t", server, reply.Success)
 		if reply.Term > rf.stateMachine.currentTerm {
 			rf.stateMachine.issueTransfer(rf.makeLargerTerm(reply.Term, server))
 		} else {
-			rf.logMachine.issueTransfer(rf.makeAEReplied(server, len(args.Entries), reply.Success, reply.ConflictPrevIndex, reply.ConflictPrevTerm))
+			rf.stateMachine.issueTransfer(rf.makeAEReplied(server, &args, &reply))
 		}
-		rf.logMachine.rwmu.RUnlock()
 		rf.stateMachine.rwmu.RUnlock()
 	}
 	cond.L.Lock()

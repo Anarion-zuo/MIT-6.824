@@ -64,3 +64,12 @@ This passes when `Start` is handled correctly.
 
 - The optimization when a follower is many entries behind is not neccessary. It makes this test goes faster.
 
+## lab2C
+
+The interaction between logMachine and stateMachine is too complex, so I made them into one state machine.
+
+Figure8Unreliable2C is likely to fail in the previous version of AppendEntries reply handling. I must change it so that nextIndex is computed based on the value of the PrevLogIndex in the corresponding args of a given reply, rather than the old value of nextIndex, because a reply may come through after a new AppendEntries is sent, by which time the nextIndex remains the same, thus the entries sent to the follower is the as many as the preceding one. I corrected this to pass this test and all other regression tests.
+
+Lab note says I must implement fast backtracking here. I do not know if this is a MUST. I implemented it anyway.
+
+I am using brute-force version of implementation on encoding & decoding state.

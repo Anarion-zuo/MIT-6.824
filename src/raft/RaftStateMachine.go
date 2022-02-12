@@ -11,6 +11,15 @@ type RaftStateMachine struct {
 	currentTerm int
 	votedFor    int
 
+	log         []LogEntry
+	commitIndex int
+	lastApplied int
+	applyCh     *chan ApplyMsg
+
+	// volatile
+	nextIndex  []int
+	matchIndex []int
+
 	stateNameMap map[SMState]string
 }
 
@@ -45,7 +54,7 @@ func (e *RaftTransferExecutor) executeTransfer(source SMState, trans SMTransfer)
 	return nextState
 }
 
-func (rf *Raft) initStateMachine() {
+func (rf *Raft) initStateMachine(applyCh *chan ApplyMsg) {
 	rf.stateMachine = &RaftStateMachine{
 		StateMachine: StateMachine{
 			curState: followerState, // initial state
@@ -55,6 +64,13 @@ func (rf *Raft) initStateMachine() {
 		currentTerm:  0,
 		votedFor:     -1,
 		stateNameMap: make(map[SMState]string),
+		// log
+		log:         make([]LogEntry, 1),
+		commitIndex: 0,
+		lastApplied: 0,
+		nextIndex:   make([]int, rf.peerCount()),
+		matchIndex:  make([]int, rf.peerCount()),
+		applyCh:     applyCh,
 	}
 	rf.stateMachine.registerStates()
 }

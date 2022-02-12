@@ -36,6 +36,7 @@ func (trans *ElectionTimeout) transfer(source SMState) SMState {
 
 	// Send RequestVote RPCs to all other servers
 	go trans.machine.raft.doElect()
+	trans.machine.raft.persist()
 	return startElectionState
 }
 
@@ -56,15 +57,12 @@ func (rf *Raft) sendJoinRequestVote(server int, voteCount *int, joinCount *int, 
 	}
 	reply := RequestVoteReply{}
 	rf.stateMachine.raft.print("sending RequestVote to %d", server)
+	args.LastLogIndex = rf.stateMachine.lastLogIndex()
+	args.LastLogTerm = rf.stateMachine.getEntry(args.LastLogIndex).Term
 	rf.stateMachine.rwmu.RUnlock()
-	rf.logMachine.rwmu.RLock()
-	args.LastLogIndex = rf.logMachine.lastLogIndex()
-	args.LastLogTerm = rf.logMachine.getEntry(args.LastLogIndex).Term
-	rf.logMachine.rwmu.RUnlock()
 
 	ok := rf.sendRequestVote(server, &args, &reply)
 
-	rf.logMachine.rwmu.RLock()
 	rf.stateMachine.rwmu.RLock()
 	if ok {
 		if reply.Term > rf.stateMachine.currentTerm {
@@ -90,7 +88,6 @@ func (rf *Raft) sendJoinRequestVote(server int, voteCount *int, joinCount *int, 
 	} else {
 		rf.stateMachine.raft.print("server %d unreachable", server)
 	}
-	rf.logMachine.rwmu.RUnlock()
 	rf.stateMachine.rwmu.RUnlock()
 	cond.L.Lock()
 	*joinCount++

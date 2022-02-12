@@ -1,23 +1,17 @@
 package raft
 
-import "log"
-
 type AddNewEntry struct {
 	command interface{}
-	log     *LogStateMachine
+	machine *RaftStateMachine
 }
 
 func (trans *AddNewEntry) transfer(source SMState) SMState {
-	if source != logNormalState {
-		log.Fatalln("log not at normal state")
-	}
-	trans.log.raft.stateMachine.rwmu.RLock()
-	trans.log.raft.print("add new log entry %v", trans.command)
-	trans.log.appendLog(LogEntry{
+	trans.machine.raft.print("add new log entry %v", trans.command)
+	trans.machine.appendLog(LogEntry{
 		Command: trans.command,
-		Term:    trans.log.raft.stateMachine.currentTerm,
+		Term:    trans.machine.raft.stateMachine.currentTerm,
 	})
-	trans.log.raft.stateMachine.rwmu.RUnlock()
+	trans.machine.raft.persist()
 	return notTransferred
 }
 
@@ -32,6 +26,6 @@ func (trans *AddNewEntry) isRW() bool {
 func (rf *Raft) makeAddNewEntry(command interface{}) *AddNewEntry {
 	return &AddNewEntry{
 		command: command,
-		log:     rf.logMachine,
+		machine: rf.stateMachine,
 	}
 }

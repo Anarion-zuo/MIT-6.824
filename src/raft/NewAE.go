@@ -1,12 +1,10 @@
 package raft
 
-import "log"
-
 type NewAE struct {
 	prevLogIndex int
 	entries      *[]LogEntry
 	leaderCommit int
-	log          *LogStateMachine
+	machine      *RaftStateMachine
 }
 
 func (trans *NewAE) getName() string {
@@ -22,34 +20,56 @@ func (rf *Raft) makeNewAE(prevLogIndex int, entries *[]LogEntry, leaderCommit in
 		prevLogIndex: prevLogIndex,
 		entries:      entries,
 		leaderCommit: leaderCommit,
-		log:          rf.logMachine,
+		machine:      rf.stateMachine,
+	}
+}
+
+func (sm *RaftStateMachine) tryApplyRoutine(entries *[]LogEntry, begin int) {
+	for i, entry := range *entries {
+		*sm.applyCh <- ApplyMsg{
+			CommandValid: true,
+			Command:      entry.Command,
+			CommandIndex: begin + i,
+			// TODO snap
+		}
+	}
+}
+
+func (sm *RaftStateMachine) tryApply() {
+	applyLen := sm.commitIndex - sm.lastApplied
+	if applyLen > 0 {
+		//sm.raft.print("applying %d entries", applyLen)
+		toBeSent := make([]LogEntry, sm.commitIndex-sm.lastApplied)
+		copy(toBeSent, sm.log[sm.lastApplied+1:sm.commitIndex+1])
+		begin := sm.lastApplied + 1
+		sm.lastApplied = sm.commitIndex
+		go sm.tryApplyRoutine(&toBeSent, begin)
 	}
 }
 
 func (trans *NewAE) transfer(source SMState) SMState {
-	if source != logNormalState {
-		log.Fatalln("log not at normal state")
-	}
-	trans.log.raft.stateMachine.rwmu.RLock()
-	trans.log.raft.print("appending %d entries", len(*trans.entries))
-	trans.log.raft.stateMachine.rwmu.RUnlock()
+	//if source != logNormalState {
+	//	log.Fatalln("log not at normal state")
+	//}
+	trans.machine.raft.print("appending %d entries", len(*trans.entries))
 	// If an existing entry conflicts with a new one (same index
 	// but different terms), delete the existing entry and all that
 	// follow it
-	trans.log.removeAfter(trans.prevLogIndex + 1)
+	trans.machine.removeAfter(trans.prevLogIndex + 1)
 	// Append any new entries not already in the log
-	trans.log.appendLog(*trans.entries...)
+	trans.machine.appendLog(*trans.entries...)
 	// If leaderCommit > commitIndex, set commitIndex =
 	// min(leaderCommit, index of last new entry)
-	if trans.leaderCommit > trans.log.commitIndex {
-		trans.log.raft.stateMachine.rwmu.RLock()
-		trans.log.raft.print("leader commit %d larger than mine %d", trans.leaderCommit, trans.log.commitIndex)
-		trans.log.raft.stateMachine.rwmu.RUnlock()
-		trans.log.commitIndex = trans.log.lastLogIndex()
-		if trans.leaderCommit < trans.log.lastLogIndex() {
-			trans.log.commitIndex = trans.leaderCommit
+	if trans.leaderCommit > trans.machine.commitIndex {
+		trans.machine.raft.print("leader commit %d larger than mine %d", trans.leaderCommit, trans.machine.commitIndex)
+		trans.machine.commitIndex = trans.machine.lastLogIndex()
+		if trans.leaderCommit < trans.machine.lastLogIndex() {
+			trans.machine.commitIndex = trans.leaderCommit
 		}
 	}
-	trans.log.tryApply()
+	trans.machine.tryApply()
+
+	trans.machine.raft.persist()
+
 	return notTransferred
 }

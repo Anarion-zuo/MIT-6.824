@@ -1,14 +1,10 @@
 package raft
 
-import "log"
-
 type AEReplied struct {
-	server            int
-	count             int
-	success           bool
-	conflictPrevTerm  int
-	conflictPrevIndex int
-	log               *LogStateMachine
+	server  int
+	args    *AppendEntriesArgs
+	reply   *AppendEntriesReply
+	machine *RaftStateMachine
 }
 
 func (trans *AEReplied) getName() string {
@@ -19,25 +15,21 @@ func (trans *AEReplied) isRW() bool {
 	return true
 }
 
-func (rf *Raft) makeAEReplied(server int, count int, success bool, conflictPrevIndex int, conflictPrevTerm int) *AEReplied {
+func (rf *Raft) makeAEReplied(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) *AEReplied {
 	return &AEReplied{
-		server:            server,
-		count:             count,
-		success:           success,
-		conflictPrevIndex: conflictPrevIndex,
-		conflictPrevTerm:  conflictPrevTerm,
-		log:               rf.logMachine,
+		server:  server,
+		args:    args,
+		reply:   reply,
+		machine: rf.stateMachine,
 	}
 }
 
 func (trans *AEReplied) doSuccess() {
 	// If successful: update nextIndex and matchIndex for follower
-	trans.log.raft.stateMachine.rwmu.RLock()
-	trans.log.raft.print("increment %d follower nextIndex by %d", trans.server, trans.count)
-	trans.log.raft.stateMachine.rwmu.RUnlock()
-	trans.log.nextIndex[trans.server] += trans.count
-	trans.log.matchIndex[trans.server] = trans.log.nextIndex[trans.server] - 1
-	trans.log.tryCommit()
+	trans.machine.raft.print("increment %d follower nextIndex by %d", trans.server, len(trans.args.Entries))
+	trans.machine.nextIndex[trans.server] = trans.args.PrevLogIndex + 1 + len(trans.args.Entries)
+	trans.machine.matchIndex[trans.server] = trans.machine.nextIndex[trans.server] - 1
+	trans.machine.tryCommit()
 }
 
 func (trans *AEReplied) doFailed() {
@@ -46,37 +38,33 @@ func (trans *AEReplied) doFailed() {
 	//trans.logMachine.nextIndex[trans.server]--
 
 	// fast backtracking
-	trans.log.nextIndex[trans.server] = trans.conflictPrevIndex + 1
+	if trans.reply.ConflictPrevIndex < 1 {
+		trans.machine.nextIndex[trans.server] = 1
+	} else {
+		trans.machine.nextIndex[trans.server] = trans.reply.ConflictPrevIndex
+	}
+	//trans.machine.nextIndex[trans.server] = trans.conflictPrevIndex + 1
 
-	trans.log.raft.stateMachine.rwmu.RLock()
-	trans.log.raft.print("log rejected by %d, try again on nextIndex %d next cycle", trans.server, trans.log.nextIndex[trans.server])
-	trans.log.raft.stateMachine.rwmu.RUnlock()
+	trans.machine.raft.print("log rejected by %d, try again on nextIndex %d next cycle", trans.server, trans.machine.nextIndex[trans.server])
 
 }
 
 func (trans *AEReplied) transfer(source SMState) SMState {
-	if source != logNormalState {
-		log.Fatalln("log not at normal state")
-	}
-	if trans.success {
+	if trans.reply.Success {
 		trans.doSuccess()
 	} else {
 		trans.doFailed()
 	}
-	trans.log.raft.stateMachine.rwmu.RLock()
-	trans.log.raft.print("nextIndex %v", trans.log.nextIndex)
-	trans.log.raft.stateMachine.rwmu.RUnlock()
+	trans.machine.raft.print("nextIndex %v", trans.machine.nextIndex)
+	trans.machine.raft.persist()
 	return notTransferred
 }
 
-func (sm *LogStateMachine) tryCommit() {
+func (sm *RaftStateMachine) tryCommit() {
 	Ntemp := sm.commitIndex + 1
 	if Ntemp > sm.lastLogIndex() {
 		return
 	}
-
-	sm.raft.stateMachine.rwmu.RLock()
-	defer sm.raft.stateMachine.rwmu.RUnlock()
 
 	oldCommit := sm.commitIndex
 

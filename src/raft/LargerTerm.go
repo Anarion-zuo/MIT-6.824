@@ -28,5 +28,6 @@ func (trans *LargerTerm) transfer(source SMState) SMState {
 	trans.machine.raft.sendAETimer.stop()
 	trans.machine.raft.electionTimer.setElectionWait()
 	trans.machine.raft.electionTimer.start()
+	trans.machine.raft.persist()
 	return followerState
 }
