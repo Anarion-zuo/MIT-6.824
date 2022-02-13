@@ -20,6 +20,9 @@ type RaftStateMachine struct {
 	nextIndex  []int
 	matchIndex []int
 
+	// snap
+	lastSnapshotIndex int
+
 	stateNameMap map[SMState]string
 }
 

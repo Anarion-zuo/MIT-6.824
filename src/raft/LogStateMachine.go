@@ -34,15 +34,15 @@ func (sm *RaftStateMachine) appendLog(entries ...LogEntry) {
 }
 
 func (sm *RaftStateMachine) removeAfter(removeBegin int) {
-	sm.log = sm.log[:removeBegin]
+	sm.log = sm.log[:sm.physicalIndex(removeBegin)]
 }
 
 func (sm *RaftStateMachine) lastLogIndex() int {
-	return len(sm.log) - 1
+	return len(sm.log) - 1 + sm.lastSnapshotIndex
 }
 
 func (sm *RaftStateMachine) getEntry(index int) LogEntry {
-	return sm.log[index]
+	return sm.log[sm.physicalIndex(index)]
 }
 
 /**
@@ -103,12 +103,12 @@ func (sm *RaftStateMachine) isUpToDate(lastLogIndex int, lastLogTerm int) bool {
  */
 func (sm *RaftStateMachine) conflictPrevIndex(prevIndex int) int {
 	prevTerm := sm.getEntry(prevIndex).Term
-	for i := prevIndex; i >= 0; i-- {
+	for i := prevIndex; i >= sm.lastSnapshotIndex; i-- {
 		if prevTerm != sm.getEntry(i).Term {
 			return i
 		}
 	}
-	return 0
+	return sm.lastSnapshotIndex
 }
 
 /**

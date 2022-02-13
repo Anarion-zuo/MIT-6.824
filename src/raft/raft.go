@@ -86,7 +86,7 @@ func (rf *Raft) print(format string, vars ...interface{}) {
 		return
 	}
 	s := fmt.Sprintf(format, vars...)
-	fmt.Printf("%d %s term %d votedFor %d lastLogIndex %d lastApplied %d commitIndex %d | %s\n", rf.me, rf.stateMachine.stateNameMap[rf.stateMachine.curState], rf.stateMachine.currentTerm, rf.stateMachine.votedFor, rf.stateMachine.lastLogIndex(), rf.stateMachine.lastApplied, rf.stateMachine.commitIndex, s)
+	fmt.Printf("%d %s term %d votedFor %d lastLogIndex %d lastApplied %d commitIndex %d snap %d | %s\n", rf.me, rf.stateMachine.stateNameMap[rf.stateMachine.curState], rf.stateMachine.currentTerm, rf.stateMachine.votedFor, rf.stateMachine.lastLogIndex(), rf.stateMachine.lastApplied, rf.stateMachine.commitIndex, rf.stateMachine.lastSnapshotIndex, s)
 }
 
 // return currentTerm and whether this server
@@ -151,9 +151,13 @@ func (rf *Raft) readPersist(data []byte) {
 // have more recent info since it communicate the snapshot on applyCh.
 //
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
-
 	// Your code here (2D).
-
+	rf.stateMachine.rwmu.Lock()
+	defer rf.stateMachine.rwmu.Unlock()
+	if !rf.stateMachine.checkSnapshotUpToDate(lastIncludedIndex, lastIncludedTerm) {
+		return false
+	}
+	rf.stateMachine.installSnapshot(lastIncludedIndex, lastIncludedTerm, snapshot)
 	return true
 }
 
@@ -163,7 +167,9 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
-
+	rf.stateMachine.rwmu.Lock()
+	defer rf.stateMachine.rwmu.Unlock()
+	rf.stateMachine.installSnapshot(index, rf.stateMachine.getEntry(index).Term, snapshot)
 }
 
 //
@@ -300,7 +306,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.stateMachine.rwmu.RLock()
 	defer rf.stateMachine.rwmu.RUnlock()
 
-	rf.print("AE recved from %d", args.LeaderId)
+	rf.print("AE recved from %d prevLogTerm %d prevLogIndex %d", args.LeaderId, args.PrevLogTerm, args.PrevLogIndex)
 
 	reply.Term = rf.stateMachine.currentTerm
 
@@ -413,6 +419,49 @@ func (rf *Raft) ticker() {
 	}
 }
 
+type InstallSnapshotArgs struct {
+	Term              int
+	LeaderId          int
+	LastIncludedIndex int
+	LastIncludedTerm  int
+	Data              []byte
+}
+
+type InstallSnapshotReply struct {
+	Term int
+}
+
+func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
+	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
+	return ok
+}
+
+func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
+	rf.stateMachine.rwmu.Lock()
+	defer rf.stateMachine.rwmu.Unlock()
+	rf.print("IS recved from leader %d snapshot at index %d cmd %v", args.LeaderId, args.LastIncludedIndex, args.Data)
+	reply.Term = rf.stateMachine.currentTerm
+	// Reply immediately if term < currentTerm
+	if args.Term < rf.stateMachine.currentTerm {
+		return
+	}
+	if args.Term > rf.stateMachine.currentTerm {
+		rf.stateMachine.issueTransfer(rf.makeLargerTerm(args.Term, args.LeaderId))
+	}
+	// try to install
+	if rf.stateMachine.lastSnapshotIndex < args.LastIncludedIndex {
+		rf.stateMachine.installSnapshot(args.LastIncludedIndex, args.LastIncludedTerm, args.Data)
+		if rf.stateMachine.commitIndex < args.LastIncludedIndex {
+			rf.stateMachine.commitIndex = args.LastIncludedIndex
+		}
+		if rf.stateMachine.lastApplied < args.LastIncludedIndex {
+			rf.stateMachine.lastApplied = args.LastIncludedIndex
+		}
+		rf.stateMachine.notifyServiceIS(args.LastIncludedIndex)
+		rf.persist()
+	}
+}
+
 //
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
@@ -466,7 +515,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		randMs := rand.Int() % 500
 		time.Sleep(time.Duration(randMs) * time.Millisecond)
 
+		rf.stateMachine.rwmu.RLock()
 		rf.print("start election timer")
+		rf.stateMachine.rwmu.RUnlock()
 
 		rf.electionTimer.setElectionWait()
 		rf.electionTimer.start()

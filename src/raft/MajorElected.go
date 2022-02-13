@@ -47,7 +47,7 @@ func (rf *Raft) initAEArgsLog(server int, args *AppendEntriesArgs) {
 	args.PrevLogTerm = rf.stateMachine.getEntry(args.PrevLogIndex).Term
 	args.LeaderCommit = rf.stateMachine.commitIndex
 	if rf.stateMachine.lastLogIndex() >= nextIndex {
-		args.Entries = rf.stateMachine.log[nextIndex:]
+		args.Entries = rf.stateMachine.log[rf.stateMachine.physicalIndex(nextIndex):]
 	} else {
 		args.Entries = nil
 	}
@@ -87,11 +87,20 @@ func (rf *Raft) sendSingleAE(server int, joinCount *int, cond *sync.Cond) {
 func (rf *Raft) sendAEs() {
 	joinCount := 0
 	cond := sync.NewCond(&sync.Mutex{})
+	rf.stateMachine.rwmu.RLock()
+	nexts := make([]int, len(rf.stateMachine.nextIndex))
+	copy(nexts, rf.stateMachine.nextIndex)
+	lastSnapshotIndex := rf.stateMachine.lastSnapshotIndex
+	rf.stateMachine.rwmu.RUnlock()
 	for i := 0; i < rf.peerCount(); i++ {
 		if i == rf.me {
 			continue
 		}
-		go rf.sendSingleAE(i, &joinCount, cond)
+		if nexts[i]-1 < lastSnapshotIndex {
+			go rf.sendSingleIS(i)
+		} else {
+			go rf.sendSingleAE(i, &joinCount, cond)
+		}
 	}
 	cond.L.Lock()
 	for joinCount+1 < rf.peerCount() {

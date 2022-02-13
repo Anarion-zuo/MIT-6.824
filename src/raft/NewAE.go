@@ -40,7 +40,7 @@ func (sm *RaftStateMachine) tryApply() {
 	if applyLen > 0 {
 		//sm.raft.print("applying %d entries", applyLen)
 		toBeSent := make([]LogEntry, sm.commitIndex-sm.lastApplied)
-		copy(toBeSent, sm.log[sm.lastApplied+1:sm.commitIndex+1])
+		copy(toBeSent, sm.log[sm.physicalIndex(sm.lastApplied+1):sm.physicalIndex(sm.commitIndex+1)])
 		begin := sm.lastApplied + 1
 		sm.lastApplied = sm.commitIndex
 		go sm.tryApplyRoutine(&toBeSent, begin)

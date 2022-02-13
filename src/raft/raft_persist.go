@@ -11,8 +11,9 @@ type RaftPersister struct {
 }
 
 type RaftPersistState struct {
-	CurrentTerm int
-	VotedFor    int
+	CurrentTerm       int
+	VotedFor          int
+	LastSnapshotIndex int
 }
 
 func makeRaftPersister() *RaftPersister {
@@ -23,8 +24,9 @@ func (rp *RaftPersister) serializeState(stateMachine *RaftStateMachine) []byte {
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	err := e.Encode(RaftPersistState{
-		CurrentTerm: stateMachine.currentTerm,
-		VotedFor:    stateMachine.votedFor,
+		CurrentTerm:       stateMachine.currentTerm,
+		VotedFor:          stateMachine.votedFor,
+		LastSnapshotIndex: stateMachine.lastSnapshotIndex,
 	})
 	if err != nil {
 		panic(err)
@@ -42,6 +44,13 @@ func (rp *RaftPersister) loadState(stateMahine *RaftStateMachine, buffer []byte,
 	}
 	stateMahine.currentTerm = decoded.CurrentTerm
 	stateMahine.votedFor = decoded.VotedFor
+	stateMahine.lastSnapshotIndex = decoded.LastSnapshotIndex
+	if stateMahine.lastApplied < decoded.LastSnapshotIndex {
+		stateMahine.lastApplied = decoded.LastSnapshotIndex
+	}
+	if stateMahine.commitIndex < decoded.LastSnapshotIndex {
+		stateMahine.commitIndex = decoded.LastSnapshotIndex
+	}
 }
 
 func (rp *RaftPersister) serializeLog(machine *RaftStateMachine) []byte {
