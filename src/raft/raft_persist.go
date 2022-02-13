@@ -65,7 +65,7 @@ func (rp *RaftPersister) loadLog(machine *RaftStateMachine, buffer []byte, offse
 	machine.log = decoded
 }
 
-func (rp *RaftPersister) persist(stateMachine *RaftStateMachine, persister *Persister) {
+func (rp *RaftPersister) persist(stateMachine *RaftStateMachine) []byte {
 	stateBytes := rp.serializeState(stateMachine)
 	if len(stateBytes) > statePersistOffset {
 		panic("serialized state byte count more than manually set boundary")
@@ -78,5 +78,6 @@ func (rp *RaftPersister) persist(stateMachine *RaftStateMachine, persister *Pers
 	for i, b := range logBytes {
 		image[i+statePersistOffset] = b
 	}
-	persister.SaveRaftState(image)
+	return image
+	//persister.SaveRaftState(image)
 }

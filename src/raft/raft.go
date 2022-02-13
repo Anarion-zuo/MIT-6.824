@@ -119,7 +119,7 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
-	rf.raftPersister.persist(rf.stateMachine, rf.persister)
+	rf.persister.SaveRaftState(rf.raftPersister.persist(rf.stateMachine))
 }
 
 //
@@ -355,6 +355,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	// Your code here (2B).
 	rf.stateMachine.rwmu.Lock()
+	rf.print("recved command %v", command)
 	isLeader = rf.stateMachine.curState == sendAEState
 	term = rf.stateMachine.currentTerm
 	index = rf.stateMachine.lastLogIndex() + 1
