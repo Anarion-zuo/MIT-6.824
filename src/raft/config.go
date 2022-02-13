@@ -138,10 +138,10 @@ func (cfg *config) checkLogs(i int, m ApplyMsg) (string, bool) {
 	v := m.Command
 	for j := 0; j < len(cfg.logs); j++ {
 		if old, oldok := cfg.logs[j][m.CommandIndex]; oldok && old != v {
-			log.Printf("%v: log %v; server %v\n", i, cfg.logs[i], cfg.logs[j])
+			log.Printf("commit index %v\ncomplete log %v\nserver %v\n", i, cfg.logs[i], cfg.logs[j])
 			// some server has already committed a different value for this entry!
-			err_msg = fmt.Sprintf("commit index=%v server=%v %v != server=%v %v",
-				m.CommandIndex, i, m.Command, j, old)
+			err_msg = fmt.Sprintf("for command at index %v server %v committed a different value %v not equal to old committed value %v from server %v",
+				m.CommandIndex, i, m.Command, old, j)
 		}
 	}
 	_, prevok := cfg.logs[i][m.CommandIndex-1]
