@@ -73,3 +73,15 @@ Figure8Unreliable2C is likely to fail in the previous version of AppendEntries r
 Lab note says I must implement fast backtracking here. I do not know if this is a MUST. I implemented it anyway.
 
 I am using brute-force version of implementation on encoding & decoding state.
+
+## lab2D
+
+### SnapshotBasic
+
+### SnapshotInstall
+
+After installing a snapshot, leader must populate the snapshot to all followers. This is equivalent to fast-forward a follower's log to the place of the snapshot.
+
+To accomplish this, I tried to slow down the process of trimming logs in leader. This would not work, because there can always be a follower lagging too much behind, rendering the log compaction to no avail.
+
+The correct way of doing this is to check a follower's state when sending AppendEntries to it, and send InstallSnapshot instead if the follower lags behind the current compacted log of the leader. Let me try this tomorrow!!!
