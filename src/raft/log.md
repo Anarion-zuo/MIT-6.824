@@ -76,12 +76,16 @@ I am using brute-force version of implementation on encoding & decoding state.
 
 ## lab2D
 
-### SnapshotBasic
-
-### SnapshotInstall
-
 After installing a snapshot, leader must populate the snapshot to all followers. This is equivalent to fast-forward a follower's log to the place of the snapshot.
 
 To accomplish this, I tried to slow down the process of trimming logs in leader. This would not work, because there can always be a follower lagging too much behind, rendering the log compaction to no avail.
 
-The correct way of doing this is to check a follower's state when sending AppendEntries to it, and send InstallSnapshot instead if the follower lags behind the current compacted log of the leader. Let me try this tomorrow!!!
+The correct way of doing this is to check a follower's state when sending AppendEntries to it, and send InstallSnapshot instead if the follower lags behind the current compacted log of the leader. It works for this test.
+
+Be careful to pass correct parameters when calling functions whose params are adjacent and with the same type. Do not pass index to term, or vise versa.
+
+All Commands should be interpreted as int, though whether this limits the range of application is unknown.
+
+Should persist lastSnapshotIndex. Find all appearances of it. Then we are done.
+
+There is a tiny problem at when in crash tests. Cannot agree on certain things, but this happens only when raft runs for too long a time. Perhaps I will return to this in the future.
