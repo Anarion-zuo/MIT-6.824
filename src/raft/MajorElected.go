@@ -60,7 +60,7 @@ func (rf *Raft) sendSingleAE(server int, joinCount *int, cond *sync.Cond) {
 		LeaderId: rf.me,
 	}
 	rf.initAEArgsLog(server, &args)
-	rf.print("sending to server %d %d entries", server, len(args.Entries))
+	//rf.print("sending to server %d %d entries", server, len(args.Entries))
 	rf.stateMachine.rwmu.RUnlock()
 	reply := AppendEntriesReply{}
 
@@ -97,7 +97,7 @@ func (rf *Raft) sendAEs() {
 			continue
 		}
 		if nexts[i]-1 < lastSnapshotIndex {
-			go rf.sendSingleIS(i)
+			go rf.sendSingleIS(i, &joinCount, cond)
 		} else {
 			go rf.sendSingleAE(i, &joinCount, cond)
 		}

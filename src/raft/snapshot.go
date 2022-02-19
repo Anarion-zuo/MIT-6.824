@@ -4,6 +4,7 @@ import (
 	"6.824/labgob"
 	"bytes"
 	"log"
+	"sync"
 )
 
 /**
@@ -103,7 +104,7 @@ func (sm *RaftStateMachine) lastSnapshotCommand() []byte {
 	return w.Bytes()
 }
 
-func (rf *Raft) sendSingleIS(server int) {
+func (rf *Raft) sendSingleIS(server int, joinCount *int, cond *sync.Cond) {
 	rf.stateMachine.rwmu.RLock()
 	args := InstallSnapshotArgs{
 		Term:              rf.stateMachine.currentTerm,
@@ -124,6 +125,12 @@ func (rf *Raft) sendSingleIS(server int) {
 		}
 		rf.stateMachine.tryUpdateVolatileBySnapshot(server, rf.stateMachine.lastSnapshotIndex)
 	}
+	cond.L.Lock()
+	*joinCount++
+	if *joinCount >= rf.peerCount() {
+		cond.Broadcast()
+	}
+	cond.L.Unlock()
 }
 
 func (sm *RaftStateMachine) tryUpdateVolatileBySnapshot(server int, index int) {
