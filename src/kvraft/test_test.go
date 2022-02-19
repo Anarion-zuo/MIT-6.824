@@ -1,6 +1,9 @@
 package kvraft
 
-import "6.824/porcupine"
+import (
+	"6.824/porcupine"
+	"log"
+)
 import "6.824/models"
 import "testing"
 import "strconv"
@@ -384,7 +387,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 // Check that ops are committed fast enough, better than 1 per heartbeat interval
 func GenericTestSpeed(t *testing.T, part string, maxraftstate int) {
 	const nservers = 3
-	const numOps = 1000
+	const numOps = 100
 	cfg := make_config(t, nservers, false, maxraftstate)
 	defer cfg.cleanup()
 
@@ -487,6 +490,7 @@ func TestOnePartition3A(t *testing.T) {
 	ckp2a := cfg.makeClient(p2) // connect ckp2a to p2
 	ckp2b := cfg.makeClient(p2) // connect ckp2b to p2
 
+	log.Printf("tester: send command to majority, should progress")
 	Put(cfg, ckp1, "1", "14", nil, -1)
 	check(cfg, t, ckp1, "1", "14")
 
@@ -504,6 +508,7 @@ func TestOnePartition3A(t *testing.T) {
 		Get(cfg, ckp2b, "1", nil, -1) // different clerk in p2
 		done1 <- true
 	}()
+	log.Printf("tester: commands sent to minority")
 
 	select {
 	case <-done0:
@@ -513,6 +518,7 @@ func TestOnePartition3A(t *testing.T) {
 	case <-time.After(time.Second):
 	}
 
+	log.Printf("tester: send something to majority")
 	check(cfg, t, ckp1, "1", "14")
 	Put(cfg, ckp1, "1", "16", nil, -1)
 	check(cfg, t, ckp1, "1", "16")
@@ -521,6 +527,7 @@ func TestOnePartition3A(t *testing.T) {
 
 	cfg.begin("Test: completion after heal (3A)")
 
+	log.Printf("tester: reconnect everything")
 	cfg.ConnectAll()
 	cfg.ConnectClient(ckp2a, cfg.All())
 	cfg.ConnectClient(ckp2b, cfg.All())
