@@ -2,6 +2,7 @@ package raft
 
 import (
 	"log"
+	"sync"
 )
 
 type RaftStateMachine struct {
@@ -15,6 +16,7 @@ type RaftStateMachine struct {
 	commitIndex int
 	lastApplied int
 	applyCh     *chan ApplyMsg
+	applyCond   *sync.Cond
 
 	// volatile
 	nextIndex  []int
@@ -75,7 +77,9 @@ func (rf *Raft) initStateMachine(applyCh *chan ApplyMsg) {
 		matchIndex:  make([]int, rf.peerCount()),
 		applyCh:     applyCh,
 	}
+	rf.stateMachine.applyCond = sync.NewCond(&rf.stateMachine.rwmu)
 	rf.stateMachine.registerStates()
+	go rf.stateMachine.applyRoutine()
 }
 
 const startElectionState SMState = 900

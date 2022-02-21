@@ -7,7 +7,7 @@ package raft
 //	log *RaftStateMachine
 //}
 //
-//func (sm *RaftStateMachine) tryApplyRoutine(entries *[]LogEntry, begin int) {
+//func (sm *RaftStateMachine) applyGiven(entries *[]LogEntry, begin int) {
 //	for i, entry := range *entries {
 //		//sm.raft.stateMachine.rwmu.RLock()
 //		//sm.raft.print("applying command %v", entry.Command)
@@ -28,7 +28,7 @@ package raft
 //		toBeSent := sm.log[sm.lastApplied+1 : sm.commitIndex+1]
 //		begin := sm.lastApplied + 1
 //		sm.lastApplied = sm.commitIndex
-//		go sm.tryApplyRoutine(&toBeSent, begin)
+//		go sm.applyGiven(&toBeSent, begin)
 //	}
 //}
 //

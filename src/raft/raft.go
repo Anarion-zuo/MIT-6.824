@@ -380,6 +380,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			Command: command,
 			Term:    rf.stateMachine.currentTerm,
 		})
+		rf.sendAETimer.start()
+		go rf.sendAEs()
 	}
 	rf.stateMachine.rwmu.Unlock()
 
