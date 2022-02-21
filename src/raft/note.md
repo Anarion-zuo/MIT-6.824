@@ -89,3 +89,11 @@ All Commands should be interpreted as int, though whether this limits the range 
 Should persist lastSnapshotIndex. Find all appearances of it. Then we are done.
 
 There is a tiny problem at when in crash tests. Cannot agree on certain things, but this happens only when raft runs for too long a time. Perhaps I will return to this in the future.
+
+## On Apply mechanism
+
+When doing lab3, I find a potential bug in raft that I modified accordingly.
+
+When the server is committing too rapidly, several go routines are launched and try to send to applyCh. There is no promise which would run first, thus causes an apply-out-of-order.
+
+The way of resolving this is simple. Let a dedicated thread handles the sending to applyCh. Let other threads notify it through condvar when there is an update is commitIndex.
