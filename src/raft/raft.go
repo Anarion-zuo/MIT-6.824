@@ -77,7 +77,7 @@ type Raft struct {
 	printFlag bool
 }
 
-func (rf *Raft) peerCount() int {
+func (rf *Raft) PeerCount() int {
 	return len(rf.peers)
 }
 

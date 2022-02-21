@@ -73,8 +73,8 @@ func (rf *Raft) initStateMachine(applyCh *chan ApplyMsg) {
 		log:         make([]LogEntry, 1),
 		commitIndex: 0,
 		lastApplied: 0,
-		nextIndex:   make([]int, rf.peerCount()),
-		matchIndex:  make([]int, rf.peerCount()),
+		nextIndex:   make([]int, rf.PeerCount()),
+		matchIndex:  make([]int, rf.PeerCount()),
 		applyCh:     applyCh,
 	}
 	rf.stateMachine.applyCond = sync.NewCond(&rf.stateMachine.rwmu)
