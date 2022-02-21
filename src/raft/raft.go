@@ -51,6 +51,10 @@ type ApplyMsg struct {
 	Snapshot      []byte
 	SnapshotTerm  int
 	SnapshotIndex int
+
+	// raft state report
+	IsLeader bool
+	Term     int
 }
 
 //
@@ -384,7 +388,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		go rf.sendAEs()
 	}
 	rf.stateMachine.rwmu.Unlock()
-
 	return index, term, isLeader
 }
 

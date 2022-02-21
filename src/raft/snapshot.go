@@ -21,17 +21,17 @@ func (sm *RaftStateMachine) panicIfSnapshotInvalid(index int, snapshot []byte) {
 		log.Panicf("snapshotting index %d smaller than last snapshot index %d", index, sm.lastSnapshotIndex)
 	}
 	// must check if index is within my range
-	my := sm.getEntry(index).Command.(int)
-	r := bytes.NewBuffer(snapshot)
-	d := labgob.NewDecoder(r)
-	var s int
-	err := d.Decode(&s)
-	if err != nil {
-		log.Panicln("encode command error")
-	}
-	if my != s {
-		log.Panicf("snapshotting at index %d value %d not equal to my log %d", index, s, sm.getEntry(index).Command.(int))
-	}
+	//my := sm.getEntry(index).Command
+	//r := bytes.NewBuffer(snapshot)
+	//d := labgob.NewDecoder(r)
+	//var s int
+	//err := d.Decode(&s)
+	//if err != nil {
+	//	log.Panicln("encode command error")
+	//}
+	//if my != s {
+	//	log.Panicf("snapshotting at index %d value %d not equal to my log %d", index, s, sm.getEntry(index).Command.(int))
+	//}
 }
 
 func (sm *RaftStateMachine) physicalIndex(index int) int {
@@ -45,12 +45,11 @@ func (sm *RaftStateMachine) fastForwardSnapshot(term int, snapshot []byte) {
 	}
 	r := bytes.NewBuffer(snapshot)
 	d := labgob.NewDecoder(r)
-	var decoded int
-	err := d.Decode(&decoded)
+	err := d.Decode(newEntry.Command)
 	if err != nil {
 		log.Panicf("decode snapshot command failed: %v", err)
 	}
-	newEntry.Command = decoded
+	//newEntry.Command = decoded
 	sm.log[0] = newEntry
 }
 
@@ -98,7 +97,7 @@ func (sm *RaftStateMachine) lastSnapshotTerm() int {
 func (sm *RaftStateMachine) lastSnapshotCommand() []byte {
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
-	if e.Encode(sm.getEntry(sm.lastSnapshotIndex).Command.(int)) != nil {
+	if e.Encode(sm.getEntry(sm.lastSnapshotIndex).Command) != nil {
 		panic("failed to encode command")
 	}
 	return w.Bytes()
@@ -146,7 +145,7 @@ func (sm *RaftStateMachine) tryUpdateVolatileBySnapshot(server int, index int) {
 func (sm *RaftStateMachine) notifyServiceIS(index int) {
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
-	err := e.Encode(sm.getEntry(index).Command.(int))
+	err := e.Encode(sm.getEntry(index).Command)
 	if err != nil {
 		log.Panicf("encode command failed: %v", err)
 	}

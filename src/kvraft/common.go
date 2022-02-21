@@ -26,6 +26,8 @@ type KvCommandArgs struct {
 }
 
 type KvCommandReply struct {
-	Err   Err
-	Value string
+	Err         Err
+	Value       string
+	CommitIndex int
+	Term        int
 }
