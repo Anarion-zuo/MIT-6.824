@@ -2,7 +2,6 @@ package kvraft
 
 import (
 	"6.824/porcupine"
-	"log"
 )
 import "6.824/models"
 import "testing"
@@ -115,10 +114,10 @@ func spawn_clients_and_wait(t *testing.T, cfg *config, ncli int, fn func(me int,
 		ca[cli] = make(chan bool)
 		go run_client(t, cfg, cli, ca[cli], fn)
 	}
-	// log.Printf("spawn_clients_and_wait: waiting for clients")
+	// fmt.Printf("spawn_clients_and_wait: waiting for clients")
 	for cli := 0; cli < ncli; cli++ {
 		ok := <-ca[cli]
-		// log.Printf("spawn_clients_and_wait: client %d is done\n", cli)
+		// fmt.Printf("spawn_clients_and_wait: client %d is done\n", cli)
 		if ok == false {
 			t.Fatalf("failure")
 		}
@@ -250,7 +249,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 		clnts[i] = make(chan int)
 	}
 	for i := 0; i < 3; i++ {
-		// log.Printf("Iteration %v\n", i)
+		fmt.Printf("tester: Iteration %v\n", i)
 		atomic.StoreInt32(&done_clients, 0)
 		atomic.StoreInt32(&done_partitioner, 0)
 		go spawn_clients_and_wait(t, cfg, nclients, func(cli int, myck *Clerk, t *testing.T) {
@@ -271,7 +270,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 				}
 				nv := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"
 				if (rand.Int() % 1000) < 500 {
-					// log.Printf("%d: client new append %v\n", cli, nv)
+					fmt.Printf("tester: Append at key %s x %d y %v\n", key, cli, j)
 					Append(cfg, myck, key, nv, opLog, cli)
 					if !randomkeys {
 						last = NextValue(last, nv)
@@ -280,14 +279,15 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 				} else if randomkeys && (rand.Int()%1000) < 100 {
 					// we only do this when using random keys, because it would break the
 					// check done after Get() operations
+					fmt.Printf("tester: Put at key %s x %d y %v\n", key, cli, j)
 					Put(cfg, myck, key, nv, opLog, cli)
 					j++
 				} else {
-					// log.Printf("%d: client new get %v\n", cli, key)
+					fmt.Printf("tester: Get at key %s\n", key)
 					v := Get(cfg, myck, key, opLog, cli)
 					// the following check only makes sense when we're not using random keys
 					if !randomkeys && v != last {
-						t.Fatalf("get wrong value, key %v, wanted:\n%v\n, got\n%v\n", key, last, v)
+						t.Fatalf("get wrong value, key %v clerk %d, wanted:\n%v\n, got\n%v\n", key, cli, last, v)
 					}
 				}
 			}
@@ -296,6 +296,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 		if partitions {
 			// Allow the clients to perform some operations without interruption
 			time.Sleep(1 * time.Second)
+			fmt.Printf("tester: create partition\n")
 			go partitioner(t, cfg, ch_partitioner, &done_partitioner)
 		}
 		time.Sleep(5 * time.Second)
@@ -304,26 +305,27 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 		atomic.StoreInt32(&done_partitioner, 1) // tell partitioner to quit
 
 		if partitions {
-			// log.Printf("wait for partitioner\n")
+			// fmt.Printf("wait for partitioner\n")
 			<-ch_partitioner
 			// reconnect network and submit a request. A client may
 			// have submitted a request in a minority.  That request
 			// won't return until that server discovers a new term
 			// has started.
+			fmt.Printf("tester: reconnect partitions\n")
 			cfg.ConnectAll()
 			// wait for a while so that we have a new term
 			time.Sleep(electionTimeout)
 		}
 
 		if crash {
-			// log.Printf("shutdown servers\n")
+			fmt.Printf("tester: shutdown servers\n")
 			for i := 0; i < nservers; i++ {
 				cfg.ShutdownServer(i)
 			}
 			// Wait for a while for servers to shutdown, since
 			// shutdown isn't a real crash and isn't instantaneous
 			time.Sleep(electionTimeout)
-			// log.Printf("restart servers\n")
+			fmt.Printf("tester: restart servers\n")
 			// crash and re-start all
 			for i := 0; i < nservers; i++ {
 				cfg.StartServer(i)
@@ -331,15 +333,15 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 			cfg.ConnectAll()
 		}
 
-		// log.Printf("wait for clients\n")
+		// fmt.Printf("wait for clients\n")
 		for i := 0; i < nclients; i++ {
-			// log.Printf("read from clients %d\n", i)
+			// fmt.Printf("read from clients %d\n", i)
 			j := <-clnts[i]
 			// if j < 10 {
-			// 	log.Printf("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
+			// 	fmt.Printf("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
 			// }
 			key := strconv.Itoa(i)
-			// log.Printf("Check %v for client %d\n", j, i)
+			fmt.Printf("tester: Check %v for client %d\n", j, i)
 			v := Get(cfg, ck, key, opLog, 0)
 			if !randomkeys {
 				checkClntAppends(t, i, v, j)
@@ -387,7 +389,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 // Check that ops are committed fast enough, better than 1 per heartbeat interval
 func GenericTestSpeed(t *testing.T, part string, maxraftstate int) {
 	const nservers = 3
-	const numOps = 100
+	const numOps = 1000
 	cfg := make_config(t, nservers, false, maxraftstate)
 	defer cfg.cleanup()
 
@@ -490,7 +492,7 @@ func TestOnePartition3A(t *testing.T) {
 	ckp2a := cfg.makeClient(p2) // connect ckp2a to p2
 	ckp2b := cfg.makeClient(p2) // connect ckp2b to p2
 
-	log.Printf("tester: send command to majority, should progress")
+	fmt.Printf("tester: send command to majority, should progress\n")
 	Put(cfg, ckp1, "1", "14", nil, -1)
 	check(cfg, t, ckp1, "1", "14")
 
@@ -508,7 +510,7 @@ func TestOnePartition3A(t *testing.T) {
 		Get(cfg, ckp2b, "1", nil, -1) // different clerk in p2
 		done1 <- true
 	}()
-	log.Printf("tester: commands sent to minority")
+	fmt.Printf("tester: commands sent to minority\n")
 
 	select {
 	case <-done0:
@@ -518,7 +520,7 @@ func TestOnePartition3A(t *testing.T) {
 	case <-time.After(time.Second):
 	}
 
-	log.Printf("tester: send something to majority")
+	fmt.Printf("tester: send something to majority\n")
 	check(cfg, t, ckp1, "1", "14")
 	Put(cfg, ckp1, "1", "16", nil, -1)
 	check(cfg, t, ckp1, "1", "16")
@@ -527,7 +529,7 @@ func TestOnePartition3A(t *testing.T) {
 
 	cfg.begin("Test: completion after heal (3A)")
 
-	log.Printf("tester: reconnect everything")
+	fmt.Printf("tester: reconnect everything\n")
 	cfg.ConnectAll()
 	cfg.ConnectClient(ckp2a, cfg.All())
 	cfg.ConnectClient(ckp2b, cfg.All())
