@@ -70,7 +70,7 @@ func (sm *RaftStateMachine) tryCommit() {
 
 	for {
 		agreeCount := 0
-		for i := 0; i < sm.raft.peerCount(); i++ {
+		for i := 0; i < sm.raft.PeerCount(); i++ {
 			if i == sm.raft.me {
 				continue
 			}
@@ -78,7 +78,7 @@ func (sm *RaftStateMachine) tryCommit() {
 				agreeCount++
 			}
 		}
-		if agreeCount+1 > sm.raft.peerCount()/2 {
+		if agreeCount+1 > sm.raft.PeerCount()/2 {
 			sm.commitIndex = Ntemp
 		}
 		Ntemp++

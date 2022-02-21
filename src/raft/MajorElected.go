@@ -26,7 +26,7 @@ func (trans *MajorElected) transfer(source SMState) SMState {
 	if source == startElectionState {
 		// init volatile
 		trans.machine.raft.print("first sendAE after elected")
-		trans.machine.raft.stateMachine.initVolatile(trans.machine.raft.peerCount())
+		trans.machine.raft.stateMachine.initVolatile(trans.machine.raft.PeerCount())
 	}
 	trans.machine.raft.electionTimer.stop()
 	// start send AE
@@ -78,7 +78,7 @@ func (rf *Raft) sendSingleAE(server int, joinCount *int, cond *sync.Cond) {
 	}
 	cond.L.Lock()
 	*joinCount++
-	if *joinCount+1 >= rf.peerCount() {
+	if *joinCount+1 >= rf.PeerCount() {
 		cond.Broadcast()
 	}
 	cond.L.Unlock()
@@ -92,7 +92,7 @@ func (rf *Raft) sendAEs() {
 	copy(nexts, rf.stateMachine.nextIndex)
 	lastSnapshotIndex := rf.stateMachine.lastSnapshotIndex
 	rf.stateMachine.rwmu.RUnlock()
-	for i := 0; i < rf.peerCount(); i++ {
+	for i := 0; i < rf.PeerCount(); i++ {
 		if i == rf.me {
 			continue
 		}
@@ -103,7 +103,7 @@ func (rf *Raft) sendAEs() {
 		}
 	}
 	cond.L.Lock()
-	for joinCount+1 < rf.peerCount() {
+	for joinCount+1 < rf.PeerCount() {
 		cond.Wait()
 	}
 	cond.L.Unlock()

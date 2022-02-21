@@ -127,7 +127,7 @@ func (rf *Raft) sendSingleIS(server int, joinCount *int, cond *sync.Cond) {
 	}
 	cond.L.Lock()
 	*joinCount++
-	if *joinCount >= rf.peerCount() {
+	if *joinCount+1 >= rf.PeerCount() {
 		cond.Broadcast()
 	}
 	cond.L.Unlock()

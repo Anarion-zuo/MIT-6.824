@@ -132,8 +132,8 @@ func (sm *RaftStateMachine) backTrackLogTerm(term int) int {
 //		log:         make([]LogEntry, 1),
 //		commitIndex: 0,
 //		lastApplied: 0,
-//		nextIndex:   make([]int, rf.peerCount()),
-//		matchIndex:  make([]int, rf.peerCount()),
+//		nextIndex:   make([]int, rf.PeerCount()),
+//		matchIndex:  make([]int, rf.PeerCount()),
 //		raft:        rf,
 //		applyCh:     applyCh,
 //	}

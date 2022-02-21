@@ -76,9 +76,9 @@ func (rf *Raft) sendJoinRequestVote(server int, voteCount *int, joinCount *int, 
 			}
 			// If votes received from majority of servers: become leader
 			cond.L.Lock()
-			if *voteCount+1 > rf.peerCount()/2 {
+			if *voteCount+1 > rf.PeerCount()/2 {
 				if !*elected {
-					rf.stateMachine.raft.print("got elected on %d votes from %d peers", *voteCount, rf.peerCount())
+					rf.stateMachine.raft.print("got elected on %d votes from %d peers", *voteCount, rf.PeerCount())
 					rf.stateMachine.issueTransfer(rf.makeMajorElected())
 					*elected = true
 				}
@@ -91,7 +91,7 @@ func (rf *Raft) sendJoinRequestVote(server int, voteCount *int, joinCount *int, 
 	rf.stateMachine.rwmu.RUnlock()
 	cond.L.Lock()
 	*joinCount++
-	if *joinCount+1 >= rf.peerCount() {
+	if *joinCount+1 >= rf.PeerCount() {
 		cond.Broadcast()
 	}
 	cond.L.Unlock()
@@ -102,14 +102,14 @@ func (rf *Raft) doElect() {
 	joinCount := 0
 	elected := false
 	cond := sync.NewCond(&sync.Mutex{})
-	for i := 0; i < rf.peerCount(); i++ {
+	for i := 0; i < rf.PeerCount(); i++ {
 		if i == rf.me {
 			continue
 		}
 		go rf.sendJoinRequestVote(i, &voteCount, &joinCount, &elected, cond)
 	}
 	cond.L.Lock()
-	for joinCount+1 < rf.peerCount() {
+	for joinCount+1 < rf.PeerCount() {
 		cond.Wait()
 	}
 	cond.L.Unlock()
