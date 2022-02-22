@@ -39,3 +39,7 @@ Need no snapshot yet. Raft can play through logs from its persistent. The proble
 This is probably because the reading of state in RPC handler is not the same time as the execution of the command. Therefore, a possible solution to this is to transmit the required state in the execution of certain command.
 
 Although what is described above is an important issue, it is not the cause of the problem. I formerly adopted a mechanism to generate an id for each rpc request and map it to certain condvar or channel. This is flawed because server generates ids from 0 or 1 or any given value at each restart, so applying routine cannot differentiate between old and new requests. The correct way of handling this is to map commit index to condvars or channels, as each valid request is unique in its commit index across restarts. It must ensure that condvars are initialized before applying routine can broadcast. This is done by locking the calling of Raft.Start and cond.Broadcast with the same lock.
+
+## snapshot
+
+When I first begin working on kvraft's snapshot, I do not fully comprehend the architecture of raft's snapshot. The snapshot parameter passed into Snapshot and CondSnapshot is for the storing of the snapshot of the service, not for validation of log entries. The byte array in ApplyMsg is for the sending of a snapshot to the service.
