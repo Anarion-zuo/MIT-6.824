@@ -50,7 +50,9 @@ func (sm *RaftStateMachine) applyRoutine() {
 
 func (sm *RaftStateMachine) applyGiven(entries []LogEntry, begin int, isLeader bool, term int) {
 	for i, entry := range entries {
+		sm.rwmu.RLock()
 		sm.raft.print("applying index %d", begin+i)
+		sm.rwmu.RUnlock()
 		*sm.applyCh <- ApplyMsg{
 			CommandValid: true,
 			Command:      entry.Command,
