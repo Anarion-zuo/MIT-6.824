@@ -17,10 +17,7 @@ func (sm *StateMachine) machineLoop() {
 		//fmt.Println("sm: execute " + trans.getName())
 		if trans.isRW() {
 			sm.rwmu.Lock()
-			dest := trans.transfer(sm.curState)
-			if dest != notTransferred {
-				sm.curState = dest
-			}
+			sm.callTransfer(trans)
 			sm.rwmu.Unlock()
 		} else {
 			sm.rwmu.RLock()
@@ -39,6 +36,13 @@ func (sm *StateMachine) issueTransfer(trans SMTransfer) {
 	go func() {
 		sm.transCh <- trans
 	}()
+}
+
+func (sm *StateMachine) callTransfer(trans SMTransfer) {
+	dest := trans.transfer(sm.curState)
+	if dest != notTransferred {
+		sm.curState = dest
+	}
 }
 
 type SMState int
