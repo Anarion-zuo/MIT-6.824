@@ -304,19 +304,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//rf.stateMachine.print("AppendEntries call from %d", args.LeaderId)
 	reply.Success = false
 	reply.CycleId = args.CycleId
-	rf.electionTimer.setElectionWait()
-	rf.electionTimer.start()
 
-	rf.stateMachine.rwmu.RLock()
-	defer rf.stateMachine.rwmu.RUnlock()
+	rf.stateMachine.rwmu.Lock()
+	defer rf.stateMachine.rwmu.Unlock()
 
-	rf.print("AE recved from %d prevLogTerm %d prevLogIndex %d", args.LeaderId, args.PrevLogTerm, args.PrevLogIndex)
+	rf.print("AE recved from %d prevLogTerm %d prevLogIndex %d length %d", args.LeaderId, args.PrevLogTerm, args.PrevLogIndex, len(args.Entries))
 
 	reply.Term = rf.stateMachine.currentTerm
 
 	if args.Term > rf.stateMachine.currentTerm {
 		rf.print("encounters larger term %d, transfer to follower", args.Term)
-		rf.stateMachine.issueTransfer(rf.makeLargerTerm(args.Term, args.LeaderId))
+		rf.stateMachine.callTransfer(rf.makeLargerTerm(args.Term, args.LeaderId))
 		reply.Success = true
 		//return
 	}
@@ -324,6 +322,16 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term < rf.stateMachine.currentTerm {
 		rf.print("reply false because leader term %d less than mine %d", args.Term, rf.stateMachine.currentTerm)
 		return
+	}
+	// candidate should transfer to follower on recving AppendEntries RPC
+	if rf.stateMachine.curState == startElectionState {
+		rf.stateMachine.curState = followerState
+		rf.stateMachine.votedFor = args.LeaderId
+		rf.stateMachine.currentTerm = args.Term
+	}
+	if rf.stateMachine.curState == followerState {
+		rf.electionTimer.setElectionWait()
+		rf.electionTimer.start()
 	}
 	// Reply false if log doesn’t contain an entry at prevLogIndex
 	// whose term matches prevLogTerm
@@ -339,7 +347,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.ConflictPrevTerm = rf.stateMachine.getEntry(reply.ConflictPrevIndex).Term
 		return
 	}
-	rf.stateMachine.issueTransfer(rf.makeNewAE(args.PrevLogIndex, &args.Entries, args.LeaderCommit))
+	rf.stateMachine.callTransfer(rf.makeNewAE(args.PrevLogIndex, args.Entries, args.LeaderCommit))
 
 	reply.Success = true
 }
