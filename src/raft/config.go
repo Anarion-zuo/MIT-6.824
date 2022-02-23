@@ -517,7 +517,7 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 				index1, _, ok := rf.Start(cmd)
 				if ok {
 					index = index1
-					log.Printf("tester: leader %d submitted command(%v)\n", starts, cmd)
+					log.Printf("tester: leader %d submitted index %d\n", starts, index)
 					break
 				}
 			}
@@ -533,14 +533,14 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 					// committed
 					if cmd1 == cmd {
 						// and it was the command we submitted.
-						log.Printf("tester: successfully agreed on command(%v) index %d\n", cmd, index)
+						log.Printf("tester: successfully agreed on index %d\n", index)
 						return index
 					}
 				}
 				time.Sleep(20 * time.Millisecond)
 			}
 			if retry == false {
-				cfg.t.Fatalf("one(%v) failed to reach agreement", cmd)
+				cfg.t.Fatalf("at index %d one(%v) failed to reach agreement", index, cmd)
 			}
 			log.Println("tester: failed to send command, try again")
 		} else {
