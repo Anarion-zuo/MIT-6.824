@@ -203,8 +203,8 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
-	rf.stateMachine.rwmu.RLock()
-	defer rf.stateMachine.rwmu.RUnlock()
+	rf.stateMachine.rwmu.Lock()
+	defer rf.stateMachine.rwmu.Unlock()
 
 	reply.VoteGranted = false
 	reply.Term = rf.stateMachine.currentTerm
@@ -212,7 +212,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	var stateBool bool
 	if args.Term > rf.stateMachine.currentTerm {
 		rf.print("encounters larger term %d, transfer to follower", args.Term)
-		rf.stateMachine.issueTransfer(rf.makeLargerTerm(args.Term, args.CandidateId))
+		rf.stateMachine.callTransfer(rf.makeLargerTerm(args.Term, args.CandidateId))
 		stateBool = true
 	} else if args.Term < rf.stateMachine.currentTerm {
 		// Reply false if term < currentTerm
@@ -233,7 +233,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 	if stateBool && logBool {
 		reply.VoteGranted = true
-		rf.stateMachine.issueTransfer(rf.makeLargerTerm(args.Term, args.CandidateId))
+		//rf.stateMachine.callTransfer(rf.makeLargerTerm(args.Term, args.CandidateId))
 	}
 }
 
