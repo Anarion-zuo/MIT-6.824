@@ -512,7 +512,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		}
 	}()
 
-	rf.initStateMachine(&applyCh)
+	rf.initStateMachine(applyCh)
 	rf.raftPersister = makeRaftPersister()
 	rf.electionTimer = makeTimer(electWaitMs, rf.makeElectionTimeout(), rf)
 	rf.sendAETimer = makeTimer(sendAEWaitMs, rf.makeMajorElected(), rf)
