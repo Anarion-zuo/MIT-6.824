@@ -26,9 +26,9 @@ func (rf *Raft) makeAEReplied(server int, args *AppendEntriesArgs, reply *Append
 
 func (trans *AEReplied) doSuccess() {
 	// If successful: update nextIndex and matchIndex for follower
-	trans.machine.raft.print("increment %d follower nextIndex by %d", trans.server, len(trans.args.Entries))
 	trans.machine.nextIndex[trans.server] = trans.args.PrevLogIndex + 1 + len(trans.args.Entries)
 	trans.machine.matchIndex[trans.server] = trans.machine.nextIndex[trans.server] - 1
+	trans.machine.raft.print("%d entries sent to server %d at prevIndex %d nextIndex updated to %v", len(trans.args.Entries), trans.server, trans.args.PrevLogIndex, trans.machine.nextIndex)
 	trans.machine.tryCommit()
 }
 
@@ -55,7 +55,6 @@ func (trans *AEReplied) transfer(source SMState) SMState {
 	} else {
 		trans.doFailed()
 	}
-	trans.machine.raft.print("nextIndex %v", trans.machine.nextIndex)
 	trans.machine.raft.persist()
 	return notTransferred
 }
