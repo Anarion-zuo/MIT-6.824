@@ -373,7 +373,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	// Your code here (2B).
 	rf.stateMachine.rwmu.Lock()
-	rf.print("recved command %v", command)
 	isLeader = rf.stateMachine.curState == sendAEState
 	term = rf.stateMachine.currentTerm
 	index = rf.stateMachine.lastLogIndex() + 1
@@ -388,6 +387,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		// Instead of forcing all writing behavior into state stateMachine processes
 		// the state is transferred here manually
 		// partly because log has only one state for now
+		rf.print("recved command to index %d", index)
 		rf.stateMachine.appendLog(LogEntry{
 			Command: command,
 			Term:    rf.stateMachine.currentTerm,
