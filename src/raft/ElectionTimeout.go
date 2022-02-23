@@ -25,6 +25,7 @@ func (trans *ElectionTimeout) transfer(source SMState) SMState {
 	}
 	trans.machine.raft.print("begin election")
 	trans.machine.raft.electionTimer.stop()
+	trans.machine.raft.sendAETimer.stop()
 	// On conversion to candidate, start election
 	// Increment currentTerm
 	trans.machine.currentTerm++
