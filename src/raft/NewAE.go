@@ -2,7 +2,7 @@ package raft
 
 type NewAE struct {
 	prevLogIndex int
-	entries      *[]LogEntry
+	entries      []LogEntry
 	leaderCommit int
 	machine      *RaftStateMachine
 }
@@ -15,7 +15,7 @@ func (trans *NewAE) isRW() bool {
 	return true
 }
 
-func (rf *Raft) makeNewAE(prevLogIndex int, entries *[]LogEntry, leaderCommit int) *NewAE {
+func (rf *Raft) makeNewAE(prevLogIndex int, entries []LogEntry, leaderCommit int) *NewAE {
 	return &NewAE{
 		prevLogIndex: prevLogIndex,
 		entries:      entries,
@@ -53,7 +53,7 @@ func (sm *RaftStateMachine) applyGiven(entries []LogEntry, begin int, isLeader b
 		sm.rwmu.RLock()
 		sm.raft.print("applying index %d", begin+i)
 		sm.rwmu.RUnlock()
-		*sm.applyCh <- ApplyMsg{
+		sm.applyCh <- ApplyMsg{
 			CommandValid: true,
 			Command:      entry.Command,
 			CommandIndex: begin + i,
@@ -91,13 +91,13 @@ func (trans *NewAE) transfer(source SMState) SMState {
 	//if source != logNormalState {
 	//	log.Fatalln("log not at normal state")
 	//}
-	trans.machine.raft.print("appending %d entries", len(*trans.entries))
+	trans.machine.raft.print("appending %d entries", len(trans.entries))
 	// If an existing entry conflicts with a new one (same index
 	// but different terms), delete the existing entry and all that
 	// follow it
 	trans.machine.removeAfter(trans.prevLogIndex + 1)
 	// Append any new entries not already in the log
-	trans.machine.appendLog(*trans.entries...)
+	trans.machine.appendLog(trans.entries...)
 	// If leaderCommit > commitIndex, set commitIndex =
 	// min(leaderCommit, index of last new entry)
 	if trans.leaderCommit > trans.machine.commitIndex {

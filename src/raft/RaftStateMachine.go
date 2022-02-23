@@ -15,7 +15,7 @@ type RaftStateMachine struct {
 	log         []LogEntry
 	commitIndex int
 	lastApplied int
-	applyCh     *chan ApplyMsg
+	applyCh     chan ApplyMsg
 	applyCond   *sync.Cond
 
 	// volatile
@@ -59,7 +59,7 @@ func (e *RaftTransferExecutor) executeTransfer(source SMState, trans SMTransfer)
 	return nextState
 }
 
-func (rf *Raft) initStateMachine(applyCh *chan ApplyMsg) {
+func (rf *Raft) initStateMachine(applyCh chan ApplyMsg) {
 	rf.stateMachine = &RaftStateMachine{
 		StateMachine: StateMachine{
 			curState: followerState, // initial state
