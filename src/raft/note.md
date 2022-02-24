@@ -74,6 +74,12 @@ Lab note says I must implement fast backtracking here. I do not know if this is 
 
 I am using brute-force version of implementation on encoding & decoding state.
 
+## sm problem
+
+When an RPC handler's reply is recved by sender, the sender naturally assumes that the all state transition has already taken place in the recver. This is certainly not the case if the handler calls `issueTransfer`. Therefore, RPC handlers must call `transfer` inside themselves, to ensure that each of them is a self-contained state-transfer operation.
+
+This resolves the cases that sometimes there are 2 leaders at the same instance.
+
 ## lab2D
 
 After installing a snapshot, leader must populate the snapshot to all followers. This is equivalent to fast-forward a follower's log to the place of the snapshot.
