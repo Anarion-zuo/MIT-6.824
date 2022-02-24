@@ -15,7 +15,7 @@ func (sm *StateMachine) machineLoop() {
 	for {
 		trans := <-sm.transCh
 		//fmt.Println("sm: execute " + trans.getName())
-		if trans.isRW() {
+		/*if trans.isRW() {
 			sm.rwmu.Lock()
 			sm.callTransfer(trans)
 			sm.rwmu.Unlock()
@@ -28,7 +28,10 @@ func (sm *StateMachine) machineLoop() {
 				sm.curState = dest
 				sm.rwmu.Unlock()
 			}
-		}
+		}*/
+		sm.rwmu.Lock()
+		sm.callTransfer(trans)
+		sm.rwmu.Unlock()
 	}
 }
 
