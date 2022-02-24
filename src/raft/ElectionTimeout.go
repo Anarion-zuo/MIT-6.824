@@ -64,7 +64,7 @@ func (rf *Raft) sendJoinRequestVote(server int, voteCount *int, joinCount *int, 
 
 	ok := rf.sendRequestVote(server, &args, &reply)
 
-	rf.stateMachine.rwmu.RLock()
+	rf.stateMachine.rwmu.Lock()
 	if ok {
 		if reply.Term > rf.stateMachine.currentTerm {
 			rf.stateMachine.issueTransfer(rf.makeLargerTerm(reply.Term, server))
@@ -80,7 +80,7 @@ func (rf *Raft) sendJoinRequestVote(server int, voteCount *int, joinCount *int, 
 			if *voteCount+1 > rf.PeerCount()/2 {
 				if !*elected {
 					rf.stateMachine.raft.print("got elected on %d votes from %d peers", *voteCount, rf.PeerCount())
-					rf.stateMachine.issueTransfer(rf.makeMajorElected())
+					rf.stateMachine.callTransfer(rf.makeMajorElected())
 					*elected = true
 				}
 			}
@@ -89,7 +89,7 @@ func (rf *Raft) sendJoinRequestVote(server int, voteCount *int, joinCount *int, 
 	} else {
 		rf.stateMachine.raft.print("server %d unreachable", server)
 	}
-	rf.stateMachine.rwmu.RUnlock()
+	rf.stateMachine.rwmu.Unlock()
 	cond.L.Lock()
 	*joinCount++
 	if *joinCount+1 >= rf.PeerCount() {
