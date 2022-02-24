@@ -32,7 +32,7 @@ func (trans *MajorElected) transfer(source SMState) SMState {
 	}
 	trans.machine.raft.electionTimer.stop()
 	// start send AE
-	go trans.machine.raft.sendAEs(trans.machine.raft.persister.ReadSnapshot())
+	trans.machine.raft.sendAEs(trans.machine.raft.persister.ReadSnapshot())
 	// set timer
 	trans.machine.raft.sendAETimer.start()
 
@@ -56,13 +56,11 @@ func (rf *Raft) initAEArgsLog(server int, args *AppendEntriesArgs) {
 }
 
 func (rf *Raft) sendAEorIS(server int, joinCount *int, cond *sync.Cond) {
-	rf.stateMachine.rwmu.RLock()
 	if rf.stateMachine.nextIndex[server]-1 < rf.stateMachine.lastSnapshotIndex {
 		rf.sendSingleIS(server, rf.persister.ReadSnapshot(), joinCount, cond)
 	} else {
 		rf.sendSingleAE(server, joinCount, cond)
 	}
-	rf.stateMachine.rwmu.RUnlock()
 }
 
 func (rf *Raft) sendSingleAE(server int, joinCount *int, cond *sync.Cond) {
@@ -112,9 +110,9 @@ func (rf *Raft) sendAEs() {
 		}
 		rf.sendAEorIS(i, &joinCount, cond)
 	}
-	cond.L.Lock()
-	for joinCount+1 < rf.PeerCount() {
-		cond.Wait()
-	}
-	cond.L.Unlock()
+	//cond.L.Lock()
+	//for joinCount+1 < rf.PeerCount() {
+	//	cond.Wait()
+	//}
+	//cond.L.Unlock()
 }

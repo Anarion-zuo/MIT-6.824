@@ -399,8 +399,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			Command: command,
 			Term:    rf.stateMachine.currentTerm,
 		})
-		//rf.sendAETimer.start()
-		//go rf.sendAEs(rf.persister.ReadSnapshot())
+		//rf.stateMachine.callTransfer(rf.makeMajorElected())
 	}
 	rf.stateMachine.rwmu.Unlock()
 	return index, term, isLeader

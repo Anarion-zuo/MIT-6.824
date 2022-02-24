@@ -63,6 +63,8 @@ This passes when `Start` is handled correctly.
 ### TestBackup
 
 - The optimization when a follower is many entries behind is not neccessary. It makes this test goes faster.
+- Sometimes we get an index overflow on log index. This is because an AE is being sent after the leader meets a larger term and transferred to follower, with its out-dated log sliced off. The way to solve this is to have the initialization of RPC args and the issueing of the sending be locked together, while have the sending action take place in an async fashion. All RPCs must do this, or the state of raft when preparing RPC args and issueing RPCs would be inconsistent.
+- When we do this, the issuer must not wait for all RPCs to reply, for RPCs can be handled by the sending thread and waiting would be pointless.
 
 ## lab2C
 
