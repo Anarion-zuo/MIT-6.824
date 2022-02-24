@@ -50,6 +50,9 @@ func (trans *AEReplied) doFailed() {
 }
 
 func (trans *AEReplied) transfer(source SMState) SMState {
+	if source != sendAEState {
+		return notTransferred
+	}
 	if trans.reply.Success {
 		trans.doSuccess()
 	} else {
