@@ -206,13 +206,19 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.stateMachine.rwmu.Lock()
 	defer rf.stateMachine.rwmu.Unlock()
 
+	rf.print("recved RequestVote from %d term %d", args.CandidateId, args.Term)
+
 	reply.VoteGranted = false
 	reply.Term = rf.stateMachine.currentTerm
+	if rf.stateMachine.curState == followerState {
+		rf.electionTimer.setElectionWait()
+		rf.electionTimer.start()
+	}
 
 	var stateBool bool
 	if args.Term > rf.stateMachine.currentTerm {
-		rf.print("encounters larger term %d, transfer to follower", args.Term)
 		rf.stateMachine.callTransfer(rf.makeLargerTerm(args.Term, args.CandidateId))
+		rf.print("encounters larger term %d, transferred to follower", args.Term)
 		stateBool = true
 	} else if args.Term < rf.stateMachine.currentTerm {
 		// Reply false if term < currentTerm
@@ -223,7 +229,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	} else {
 		stateBool = false
 	}
-	// TODO log state
+	// log state
 	logBool := rf.stateMachine.isUpToDate(args.LastLogIndex, args.LastLogTerm)
 	if !stateBool {
 		rf.print("reject vote to %d on raft state", args.CandidateId)
@@ -308,6 +314,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.stateMachine.rwmu.Lock()
 	defer rf.stateMachine.rwmu.Unlock()
 
+	if rf.stateMachine.curState == followerState {
+		rf.electionTimer.setElectionWait()
+		rf.electionTimer.start()
+	}
+
 	rf.print("AE recved from %d prevLogTerm %d prevLogIndex %d length %d", args.LeaderId, args.PrevLogTerm, args.PrevLogIndex, len(args.Entries))
 
 	reply.Term = rf.stateMachine.currentTerm
@@ -328,10 +339,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.stateMachine.curState = followerState
 		rf.stateMachine.votedFor = args.LeaderId
 		rf.stateMachine.currentTerm = args.Term
-	}
-	if rf.stateMachine.curState == followerState {
-		rf.electionTimer.setElectionWait()
-		rf.electionTimer.start()
 	}
 	// Reply false if log doesn’t contain an entry at prevLogIndex
 	// whose term matches prevLogTerm
@@ -392,8 +399,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			Command: command,
 			Term:    rf.stateMachine.currentTerm,
 		})
-		rf.sendAETimer.start()
-		go rf.sendAEs()
+		//rf.sendAETimer.start()
+		//go rf.sendAEs(rf.persister.ReadSnapshot())
 	}
 	rf.stateMachine.rwmu.Unlock()
 	return index, term, isLeader
@@ -452,7 +459,11 @@ func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.stateMachine.rwmu.Lock()
 	defer rf.stateMachine.rwmu.Unlock()
-	rf.print("IS recved from leader %d snapshot at index %d cmd %v", args.LeaderId, args.LastIncludedIndex, args.Data)
+	if rf.stateMachine.curState == followerState {
+		rf.electionTimer.setElectionWait()
+		rf.electionTimer.start()
+	}
+	rf.print("IS recved from leader %d snapshot at index %d cmd %v", args.LeaderId, args.LastIncludedIndex, args.ServiceSnapshot)
 	reply.Term = rf.stateMachine.currentTerm
 	// Reply immediately if term < currentTerm
 	if args.Term < rf.stateMachine.currentTerm {
