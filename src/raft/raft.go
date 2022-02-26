@@ -153,6 +153,14 @@ func (rf *Raft) readPersist(data []byte) {
 	// }
 	rf.raftPersister.loadState(rf.stateMachine, data, 0)
 	rf.raftPersister.loadLog(rf.stateMachine, data, statePersistOffset)
+	go func() {
+		rf.stateMachine.rwmu.RLock()
+		if rf.persister.SnapshotSize() > 0 {
+			rf.print("sending initial snapshot to service")
+			rf.stateMachine.notifyServiceIS(rf.stateMachine.lastSnapshotIndex, rf.persister.ReadSnapshot())
+		}
+		rf.stateMachine.rwmu.RUnlock()
+	}()
 }
 
 //
@@ -547,14 +555,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.stateMachine.rwmu.Lock()
 	rf.readPersist(persister.ReadRaftState())
-	go func() {
-		rf.stateMachine.rwmu.RLock()
-		if rf.persister.SnapshotSize() > 0 {
-			rf.print("sending initial snapshot to service")
-			rf.stateMachine.notifyServiceIS(rf.stateMachine.lastSnapshotIndex, rf.persister.ReadSnapshot())
-		}
-		rf.stateMachine.rwmu.RUnlock()
-	}()
 
 	// print flag
 	rf.printFlag = true
