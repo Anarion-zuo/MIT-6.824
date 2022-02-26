@@ -1,16 +1,13 @@
 package raft
 
 import (
-	"6.824/labgob"
-	"bytes"
 	"log"
-	"sync"
 )
 
 /**
  * Check whether my log at index index is the same with snapshot.
  */
-func (sm *RaftStateMachine) panicIfSnapshotInvalid(index int, snapshot []byte) {
+func (sm *RaftStateMachine) panicIfSnapshotInvalid(index int) {
 	// index can be larger than my lastLogIndex
 	// can fast forward in this way
 	if index > sm.lastLogIndex() {
@@ -38,19 +35,9 @@ func (sm *RaftStateMachine) physicalIndex(index int) int {
 	return index - sm.lastSnapshotIndex
 }
 
-func (sm *RaftStateMachine) fastForwardSnapshot(term int, snapshot []byte) {
-	sm.log = make([]LogEntry, 1)
-	newEntry := LogEntry{
-		Term: term,
-	}
-	r := bytes.NewBuffer(snapshot)
-	d := labgob.NewDecoder(r)
-	err := d.Decode(newEntry.Command)
-	if err != nil {
-		log.Panicf("decode snapshot command failed: %v", err)
-	}
-	//newEntry.Command = decoded
-	sm.log[0] = newEntry
+func (sm *RaftStateMachine) fastForwardSnapshot(entries []LogEntry) {
+	sm.log = make([]LogEntry, len(entries))
+	copy(sm.log, entries)
 }
 
 func (sm *RaftStateMachine) trimLog(index int) {
@@ -59,27 +46,27 @@ func (sm *RaftStateMachine) trimLog(index int) {
 	sm.log = newLog
 }
 
-func (sm *RaftStateMachine) installSnapshot(index int, term int, snapshot []byte) {
+func (sm *RaftStateMachine) installSnapshot(index int, term int, entries []LogEntry, serviceSnapshot []byte) {
 	if index < sm.lastSnapshotIndex {
 		// I already have a snapshot for you
 		// do nothing
 		sm.raft.print("snapshot request at index %d smaller than current snapshotIndex %d, ignoring...", index, sm.lastSnapshotIndex)
 		return
 	}
-	sm.panicIfSnapshotInvalid(index, snapshot)
+	sm.panicIfSnapshotInvalid(index)
 	if index > sm.lastLogIndex() {
 		sm.raft.print("fast-forward snapshot to index %d", index)
-		sm.fastForwardSnapshot(term, snapshot)
+		sm.fastForwardSnapshot(entries)
 	} else {
 		sm.raft.print("trim log with snapshot at index %d", index)
 		sm.trimLog(index)
 	}
 	sm.lastSnapshotIndex = index
-	sm.raft.persist()
+	sm.raft.persistWithSnapshot(serviceSnapshot)
 }
 
 func (sm *RaftStateMachine) checkSnapshotUpToDate(index int, term int) bool {
-	myTerm := sm.getEntry(sm.lastApplied).Term
+	myTerm := sm.lastSnapshotTerm()
 	if term > myTerm {
 		return true
 	}
@@ -94,42 +81,31 @@ func (sm *RaftStateMachine) lastSnapshotTerm() int {
 	return sm.getEntry(sm.lastSnapshotIndex).Term
 }
 
-func (sm *RaftStateMachine) lastSnapshotCommand() []byte {
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-	if e.Encode(sm.getEntry(sm.lastSnapshotIndex).Command) != nil {
-		panic("failed to encode command")
-	}
-	return w.Bytes()
-}
-
-func (rf *Raft) sendSingleIS(server int, joinCount *int, cond *sync.Cond) {
-	rf.stateMachine.rwmu.RLock()
+func (rf *Raft) sendSingleIS(server int, serviceSnapshot []byte) {
+	raftLog := rf.stateMachine.log[rf.stateMachine.physicalIndex(rf.stateMachine.lastSnapshotIndex):]
+	entries := make([]LogEntry, len(raftLog))
+	copy(entries, raftLog)
 	args := InstallSnapshotArgs{
 		Term:              rf.stateMachine.currentTerm,
 		LeaderId:          rf.me,
 		LastIncludedIndex: rf.stateMachine.lastSnapshotIndex,
 		LastIncludedTerm:  rf.stateMachine.lastSnapshotTerm(),
-		Data:              rf.stateMachine.lastSnapshotCommand(),
+		Entries:           entries,
+		ServiceSnapshot:   serviceSnapshot,
 	}
-	rf.stateMachine.rwmu.RUnlock()
-	reply := InstallSnapshotReply{}
-	ok := rf.sendInstallSnapshot(server, &args, &reply)
-	if ok {
-		rf.stateMachine.rwmu.Lock()
-		defer rf.stateMachine.rwmu.Unlock()
-		if reply.Term > rf.stateMachine.currentTerm {
-			rf.stateMachine.issueTransfer(rf.makeLargerTerm(reply.Term, server))
-			return
+	go func() {
+		reply := InstallSnapshotReply{}
+		ok := rf.sendInstallSnapshot(server, &args, &reply)
+		if ok {
+			rf.stateMachine.rwmu.Lock()
+			defer rf.stateMachine.rwmu.Unlock()
+			if reply.Term > rf.stateMachine.currentTerm {
+				rf.stateMachine.issueTransfer(rf.makeLargerTerm(reply.Term, server))
+				return
+			}
+			rf.stateMachine.tryUpdateVolatileBySnapshot(server, rf.stateMachine.lastSnapshotIndex)
 		}
-		rf.stateMachine.tryUpdateVolatileBySnapshot(server, rf.stateMachine.lastSnapshotIndex)
-	}
-	cond.L.Lock()
-	*joinCount++
-	if *joinCount+1 >= rf.PeerCount() {
-		cond.Broadcast()
-	}
-	cond.L.Unlock()
+	}()
 }
 
 func (sm *RaftStateMachine) tryUpdateVolatileBySnapshot(server int, index int) {
@@ -138,22 +114,18 @@ func (sm *RaftStateMachine) tryUpdateVolatileBySnapshot(server int, index int) {
 	}
 	if sm.matchIndex[server] < sm.nextIndex[server]-1 {
 		sm.matchIndex[server] = sm.nextIndex[server] - 1
+		sm.tryCommit()
 	}
-	sm.tryCommit()
 }
 
-func (sm *RaftStateMachine) notifyServiceIS(index int) {
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-	err := e.Encode(sm.getEntry(index).Command)
-	if err != nil {
-		log.Panicf("encode command failed: %v", err)
-	}
-	msg := &ApplyMsg{
+func (sm *RaftStateMachine) notifyServiceIS(index int, serviceSnapshot []byte) {
+	msg := ApplyMsg{
 		SnapshotValid: true,
-		Snapshot:      w.Bytes(),
+		Snapshot:      serviceSnapshot,
 		SnapshotTerm:  sm.getEntry(index).Term,
 		SnapshotIndex: index,
+		IsLeader:      sm.curState == sendAEState,
+		Term:          sm.currentTerm,
 	}
 	sm.sendToApplyQ(&msg)
 }

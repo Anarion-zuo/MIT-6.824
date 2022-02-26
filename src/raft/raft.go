@@ -53,8 +53,9 @@ type ApplyMsg struct {
 	SnapshotIndex int
 
 	// raft state report
-	IsLeader bool
-	Term     int
+	IsLeader  bool
+	Term      int
+	StateSize int
 }
 
 //
@@ -126,6 +127,10 @@ func (rf *Raft) persist() {
 	rf.persister.SaveRaftState(rf.raftPersister.persist(rf.stateMachine))
 }
 
+func (rf *Raft) persistWithSnapshot(serviceSnapshot []byte) {
+	rf.persister.SaveStateAndSnapshot(rf.raftPersister.persist(rf.stateMachine), serviceSnapshot)
+}
+
 //
 // restore previously persisted state.
 //
@@ -161,7 +166,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	if !rf.stateMachine.checkSnapshotUpToDate(lastIncludedIndex, lastIncludedTerm) {
 		return false
 	}
-	rf.stateMachine.installSnapshot(lastIncludedIndex, lastIncludedTerm, snapshot)
+	rf.stateMachine.installSnapshot(lastIncludedIndex, lastIncludedTerm, nil, snapshot)
 	return true
 }
 
@@ -173,7 +178,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
 	rf.stateMachine.rwmu.Lock()
 	defer rf.stateMachine.rwmu.Unlock()
-	rf.stateMachine.installSnapshot(index, rf.stateMachine.getEntry(index).Term, snapshot)
+	rf.stateMachine.installSnapshot(index, rf.stateMachine.getEntry(index).Term, nil, snapshot)
 }
 
 //
@@ -348,6 +353,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.ConflictPrevTerm = rf.stateMachine.getEntry(rf.stateMachine.lastLogIndex()).Term
 		return
 	}
+	// entries before snapshot
+	if args.PrevLogIndex < rf.stateMachine.lastSnapshotIndex {
+		if args.PrevLogIndex+len(args.Entries) < rf.stateMachine.lastSnapshotIndex {
+			reply.Success = true
+			return
+		}
+		args.PrevLogIndex = rf.stateMachine.lastSnapshotIndex
+		args.Entries = args.Entries[rf.stateMachine.lastSnapshotIndex-args.PrevLogIndex+1:]
+		args.PrevLogTerm = rf.stateMachine.lastSnapshotTerm()
+	}
+
 	if args.PrevLogTerm != rf.stateMachine.getEntry(args.PrevLogIndex).Term {
 		rf.print("reply false my log term %d not matched with leader log term %d", rf.stateMachine.getEntry(args.PrevLogIndex).Term, args.PrevLogTerm)
 		reply.ConflictPrevIndex = rf.stateMachine.conflictPrevIndex(args.PrevLogIndex)
@@ -443,7 +459,8 @@ type InstallSnapshotArgs struct {
 	LeaderId          int
 	LastIncludedIndex int
 	LastIncludedTerm  int
-	Data              []byte
+	Entries           []LogEntry
+	ServiceSnapshot   []byte
 }
 
 type InstallSnapshotReply struct {
@@ -473,14 +490,14 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	}
 	// try to install
 	if rf.stateMachine.lastSnapshotIndex < args.LastIncludedIndex {
-		rf.stateMachine.installSnapshot(args.LastIncludedIndex, args.LastIncludedTerm, args.Data)
+		rf.stateMachine.installSnapshot(args.LastIncludedIndex, args.LastIncludedTerm, args.Entries, args.ServiceSnapshot)
 		if rf.stateMachine.commitIndex < args.LastIncludedIndex {
 			rf.stateMachine.commitIndex = args.LastIncludedIndex
 		}
 		if rf.stateMachine.lastApplied < args.LastIncludedIndex {
 			rf.stateMachine.lastApplied = args.LastIncludedIndex
 		}
-		rf.stateMachine.notifyServiceIS(args.LastIncludedIndex)
+		rf.stateMachine.notifyServiceIS(args.LastIncludedIndex, args.ServiceSnapshot)
 		rf.persist()
 	}
 }
@@ -528,10 +545,21 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.sendAETimer = makeTimer(sendAEWaitMs, rf.makeMajorElected(), rf)
 
 	// initialize from state persisted before a crash
+	rf.stateMachine.rwmu.Lock()
 	rf.readPersist(persister.ReadRaftState())
+	go func() {
+		rf.stateMachine.rwmu.RLock()
+		if rf.persister.SnapshotSize() > 0 {
+			rf.print("sending initial snapshot to service")
+			rf.stateMachine.notifyServiceIS(rf.stateMachine.lastSnapshotIndex, rf.persister.ReadSnapshot())
+		}
+		rf.stateMachine.rwmu.RUnlock()
+	}()
 
 	// print flag
 	rf.printFlag = true
+
+	rf.stateMachine.rwmu.Unlock()
 
 	// start raft state stateMachine
 	go func() {
