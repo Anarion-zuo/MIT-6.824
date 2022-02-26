@@ -18,7 +18,7 @@ type ResultManager struct {
 	mu        deadlock.Mutex
 }
 
-func makeCondManager() *ResultManager {
+func makeResultManager() *ResultManager {
 	return &ResultManager{
 		resultSet: make(map[int]map[int]*ExecutionResult),
 	}
