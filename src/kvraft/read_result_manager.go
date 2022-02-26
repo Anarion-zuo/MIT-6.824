@@ -62,6 +62,18 @@ func (m *ResultManager) insertNewResult(clerkId int, opId int, result *Execution
 	clerkSet[opId] = result
 }
 
+func (m *ResultManager) removeOutdatedResult(clerkId int, opId int) {
+	clerkSet := m.resultSet[clerkId]
+	if clerkSet == nil {
+		return
+	}
+	for k, _ := range clerkSet {
+		if k < opId {
+			delete(clerkSet, k)
+		}
+	}
+}
+
 // call this when executing Get
 func (kv *KVServer) readKV(key string, clerkId int, opId int) *ExecutionResult {
 	kv.resultManager.mu.Lock()
@@ -86,6 +98,7 @@ func (kv *KVServer) readKV(key string, clerkId int, opId int) *ExecutionResult {
 		result.Vi = *vip
 	}
 	kv.mapRwmu.RUnlock()
+	kv.resultManager.removeOutdatedResult(clerkId, opId)
 	kv.resultManager.insertNewResult(clerkId, opId, result)
 	return result
 }
