@@ -3,6 +3,7 @@ package kvraft
 import (
 	"6.824/labrpc"
 	"fmt"
+	"github.com/sasha-s/go-deadlock"
 	"time"
 )
 import "crypto/rand"
@@ -16,6 +17,8 @@ type Clerk struct {
 	opIdGenerator IdGenerator
 	myId          int
 	lastLeader    int
+	// lock on lastLeader
+	mu deadlock.Mutex
 }
 
 func nrand() int64 {
@@ -31,7 +34,9 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	// You'll have to add code here.
 	ck.opIdGenerator.curVal = 1
 	ck.myId = globalClerkIdGenerator.make()
+	ck.mu.Lock()
 	ck.lastLeader = -1
+	ck.mu.Unlock()
 	ck.print("initialized a clerk id %d", ck.myId)
 	return ck
 }
@@ -150,6 +155,8 @@ func (ck *Clerk) sendCommandToAll(getOrNot bool, args *KvCommandArgs) *KvCommand
 }
 
 func (ck *Clerk) sendCommandToLeader(getOrNot bool, args *KvCommandArgs) *KvCommandReply {
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
 	if ck.lastLeader != -1 {
 		//ck.print("opid %d try first to send to last leader %d", args.OpId, ck.lastLeader)
 		reply := KvCommandReply{}
