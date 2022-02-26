@@ -44,7 +44,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) print(format string, vars ...interface{}) {
 	if Debug {
 		s := fmt.Sprintf(format, vars...)
-		fmt.Printf("clerk %d lastLeader %d | %s\n", ck.myId, ck.lastLeader, s)
+		fmt.Printf("clerk %d | %s\n", ck.myId, s)
 	}
 }
 
@@ -231,6 +231,7 @@ func (ck *Clerk) Get(key string) string {
 			// try again
 		}
 	}
+	ck.print("Get key %s opid %d replied successfully", args.Key, args.OpId)
 	return reply.Value
 }
 
@@ -275,6 +276,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			// try again
 		}
 	}
+	ck.print("PutAppend key %s val %s opid %d replied successfully %s", args.Key, args.Value, args.OpId, reply.Err)
 }
 
 func (ck *Clerk) Put(key string, value string) {

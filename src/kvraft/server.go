@@ -240,7 +240,7 @@ func (kv *KVServer) Get(args *KvCommandArgs, reply *KvCommandReply) {
 		return
 	}
 	reply.CommitIndex = index
-	kv.print("opid %d clerk %d index %d sent to raft", op.OpId, op.ClerkId, index)
+	kv.print("opid %d Get clerk %d index %d key %s sent to raft", op.OpId, op.ClerkId, index, op.Key)
 	// wait for completion
 	kv.setOpTimeout(index)
 	result := kv.opWaitSet.waitOp(index)
@@ -269,7 +269,7 @@ func (kv *KVServer) PutAppend(args *KvCommandArgs, reply *KvCommandReply) {
 		return
 	}
 	reply.CommitIndex = index
-	kv.print("opid %d clerk %d index %d sent to raft", op.OpId, op.ClerkId, index)
+	kv.print("opid %d PutAppend clerk %d index %d key %s val %s sent to raft", op.OpId, op.ClerkId, index, op.Key, op.Value)
 	// wait for completion
 	kv.setOpTimeout(index)
 	result := kv.opWaitSet.waitOp(index)
