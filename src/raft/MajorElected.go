@@ -1,7 +1,5 @@
 package raft
 
-import "sync"
-
 type MajorElected struct {
 	RaftStateTransfer
 }
@@ -32,7 +30,7 @@ func (trans *MajorElected) transfer(source SMState) SMState {
 	}
 	trans.machine.raft.electionTimer.stop()
 	// start send AE
-	trans.machine.raft.sendAEs(trans.machine.raft.persister.ReadSnapshot())
+	trans.machine.raft.sendAEs()
 	// set timer
 	trans.machine.raft.sendAETimer.start()
 
@@ -55,15 +53,15 @@ func (rf *Raft) initAEArgsLog(server int, args *AppendEntriesArgs) {
 	}
 }
 
-func (rf *Raft) sendAEorIS(server int, joinCount *int, cond *sync.Cond) {
+func (rf *Raft) sendAEorIS(server int) {
 	if rf.stateMachine.nextIndex[server]-1 < rf.stateMachine.lastSnapshotIndex {
-		rf.sendSingleIS(server, rf.persister.ReadSnapshot(), joinCount, cond)
+		rf.sendSingleIS(server, rf.persister.ReadSnapshot())
 	} else {
-		rf.sendSingleAE(server, joinCount, cond)
+		rf.sendSingleAE(server)
 	}
 }
 
-func (rf *Raft) sendSingleAE(server int, joinCount *int, cond *sync.Cond) {
+func (rf *Raft) sendSingleAE(server int) {
 	//rf.stateMachine.rwmu.RLock()
 	args := AppendEntriesArgs{
 		Term:     rf.stateMachine.currentTerm,
@@ -87,18 +85,10 @@ func (rf *Raft) sendSingleAE(server int, joinCount *int, cond *sync.Cond) {
 			}
 			rf.stateMachine.rwmu.Unlock()
 		}
-		cond.L.Lock()
-		*joinCount++
-		if *joinCount+1 >= rf.PeerCount() {
-			cond.Broadcast()
-		}
-		cond.L.Unlock()
 	}()
 }
 
 func (rf *Raft) sendAEs() {
-	joinCount := 0
-	cond := sync.NewCond(&sync.Mutex{})
 	//rf.stateMachine.rwmu.RLock()
 	//nexts := make([]int, len(rf.stateMachine.nextIndex))
 	//copy(nexts, rf.stateMachine.nextIndex)
@@ -108,7 +98,7 @@ func (rf *Raft) sendAEs() {
 		if i == rf.me {
 			continue
 		}
-		rf.sendAEorIS(i, &joinCount, cond)
+		rf.sendAEorIS(i)
 	}
 	//cond.L.Lock()
 	//for joinCount+1 < rf.PeerCount() {
