@@ -24,6 +24,10 @@ This test passes if the preceding one passes, for no particular reason.
 
 However, the system sometimes seems to be deadlocked, given long enough time to run. The next test would reveal its reason.
 
+If we set the number of iterations to a large enough number, the architecture dictates that the leader would run slower as its log becomes larger. Eventually, some follower starts election. A command sent to the former leader would be lost due to chance and not committed, thus the tester deems the system failed. This would also cause failure in later tests.
+
+If we consider this a bug, the solution is to have the log architecture altered to a better form of storage.
+
 ### FailAgree test
 
 This test reveals much that was not reveal before... (gargage talk...)
@@ -91,6 +95,8 @@ To accomplish this, I tried to slow down the process of trimming logs in leader.
 The correct way of doing this is to check a follower's state when sending AppendEntries to it, and send InstallSnapshot instead if the follower lags behind the current compacted log of the leader. It works for this test.
 
 Be careful to pass correct parameters when calling functions whose params are adjacent and with the same type. Do not pass index to term, or vise versa.
+
+Raft must send snapshot to service if a snapshot of the service is created last time the service runned. This would be the first message to the service even before raft actually starts follower thus candidate routines. The service can handle the message at its own pace, but most likely in its initialization process.
 
 All Commands should be interpreted as int, though whether this limits the range of application is unknown.
 
