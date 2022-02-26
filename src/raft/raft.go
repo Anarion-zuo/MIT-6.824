@@ -158,6 +158,11 @@ func (rf *Raft) readPersist(data []byte) {
 		if rf.persister.SnapshotSize() > 0 {
 			rf.print("sending initial snapshot to service")
 			rf.stateMachine.notifyServiceIS(rf.stateMachine.lastSnapshotIndex, rf.persister.ReadSnapshot())
+		} else {
+			msg := ApplyMsg{
+				SnapshotValid: false,
+			}
+			rf.stateMachine.sendToApplyQ(&msg)
 		}
 		rf.stateMachine.rwmu.RUnlock()
 	}()

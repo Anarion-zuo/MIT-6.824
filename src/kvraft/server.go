@@ -50,9 +50,9 @@ type KVServer struct {
 	resultManager *ResultManager
 	opWaitSet     *OpWaitSet
 
-	persister         *KvPersister
-	committedVersions map[int][]byte
-	versionMutex      deadlock.Mutex
+	//persister         *KvPersister
+	//committedVersions map[int][]byte
+	versionMutex deadlock.Mutex
 
 	// lock when calling Raft.Start
 	// to prevent server from not finding conds for ops
@@ -158,19 +158,18 @@ func (kv *KVServer) executeApplied(cmd interface{}, index int, term int, isLeade
 	//kv.print("opid %d clerk %d recvid %d at index %d term %d notified rpc handler", op.OpId, op.ClerkId, op.RecvId, index, term)
 }
 
-func (kv *KVServer) applySnapshot(index int) {
-
-}
-
 func (kv *KVServer) pollApplyChRoutine() {
 	for {
 		msg := <-kv.applyCh
 		//kv.print("ApplyMsg CommandValid %t SnapshotValid %t", msg.CommandValid, msg.SnapshotValid)
 		if msg.CommandValid {
 			kv.executeApplied(msg.Command, msg.CommandIndex, msg.Term, msg.IsLeader)
+			if kv.maxraftstate > 0 && msg.StateSize > kv.maxraftstate {
+				kv.issueSnapshot(msg.Term, msg.CommandIndex)
+			}
 		} else if msg.SnapshotValid {
 			kv.print("raft applied snapshot at index %d", msg.SnapshotIndex)
-			kv.applySnapshot(msg.SnapshotIndex)
+			kv.executeSnapshot(msg.SnapshotIndex, msg.Snapshot)
 		} else {
 			// both not valid
 
@@ -196,7 +195,7 @@ func (kv *KVServer) makeOp(args *KvCommandArgs) *Op {
 func (kv *KVServer) setOpTimeout(recvId int) {
 	go func() {
 		time.Sleep(time.Duration(startTimeoutMs) * time.Millisecond)
-		kv.print("timeout triggered for recvid %d", recvId)
+		//kv.print("timeout triggered for recvid %d", recvId)
 		kv.opWaitSet.doneOp(recvId, &ExecutionResult{
 			Executed: false,
 			Timeout:  true,
@@ -328,11 +327,19 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+	snapshotMsg := <-kv.applyCh
+	kv.kvMap = make(map[string]*ValueIndex)
+	kv.resultManager = makeResultManager()
+	if snapshotMsg.SnapshotValid && len(snapshotMsg.Snapshot) > 0 {
+		kv.print("init with snapshot index %d term %d length %d", snapshotMsg.SnapshotIndex, snapshotMsg.SnapshotTerm, len(snapshotMsg.Snapshot))
+		kv.readSnapshot(snapshotMsg.Snapshot)
+	} else {
+
+	}
 
 	// You may need initialization code here.
-	kv.kvMap = make(map[string]*ValueIndex)
-	kv.resultManager = makeCondManager()
-	kv.committedVersions = make(map[int][]byte)
+
+	//kv.committedVersions = make(map[int][]byte)
 	kv.opWaitSet = makeOpWaitSet()
 	//kv.initKvPersister()
 
