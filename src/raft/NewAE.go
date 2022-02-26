@@ -24,44 +24,81 @@ func (rf *Raft) makeNewAE(prevLogIndex int, entries []LogEntry, leaderCommit int
 	}
 }
 
-type _ApplyInfo struct {
-	entries  []LogEntry
-	begin    int
-	isLeader bool
-	term     int
+//type _ApplyInfo struct {
+//	entries   []LogEntry
+//	begin     int
+//	isLeader  bool
+//	term      int
+//	stateSize int
+//}
+
+func (sm *RaftStateMachine) sendToApplyQ(msg *ApplyMsg) {
+	sm.applyCond.L.Lock()
+	sm.applyQ.PushBack(msg)
+	sm.applyCond.Broadcast()
+	sm.applyCond.L.Unlock()
 }
 
-func (sm *RaftStateMachine) applyRoutine() {
+func (sm *RaftStateMachine) pollApplyQ() *ApplyMsg {
+	sm.applyCond.L.Lock()
+	defer sm.applyCond.L.Unlock()
+	for sm.applyQ.Len() == 0 {
+		sm.applyCond.Wait()
+	}
+	front := sm.applyQ.Front()
+	result := front.Value.(*ApplyMsg)
+	sm.applyQ.Remove(front)
+	return result
+}
+
+func (sm *RaftStateMachine) pollApplyQRoutine() {
 	for {
-		sm.applyCond.L.Lock()
-		if sm.lastApplied > sm.commitIndex {
-			panic("lastApplied > commitIndex")
+		msg := sm.pollApplyQ()
+		sm.rwmu.RLock()
+		if msg.CommandValid {
+			sm.raft.print("applying command index %d", msg.CommandIndex)
+		} else if msg.SnapshotValid {
+			sm.raft.print("applying snapshot index %d", msg.SnapshotIndex)
+		} else {
+			panic("unknown apply type")
 		}
-		for sm.commitIndex == sm.lastApplied {
-			sm.applyCond.Wait()
-		}
-		info := sm.tryApply()
-		sm.applyCond.L.Unlock()
-		if info != nil {
-			sm.applyGiven(info.entries, info.begin, info.isLeader, info.term)
-		}
+		sm.rwmu.RUnlock()
+		sm.applyCh <- *msg
 	}
 }
 
-func (sm *RaftStateMachine) applyGiven(entries []LogEntry, begin int, isLeader bool, term int) {
-	for i, entry := range entries {
-		sm.rwmu.RLock()
-		sm.raft.print("applying index %d", begin+i)
-		sm.rwmu.RUnlock()
-		sm.applyCh <- ApplyMsg{
-			CommandValid: true,
-			Command:      entry.Command,
-			CommandIndex: begin + i,
-			IsLeader:     isLeader,
-			Term:         term,
-		}
-	}
-}
+//func (sm *RaftStateMachine) applyRoutine() {
+//	for {
+//		sm.applyCond.L.Lock()
+//		if sm.lastApplied > sm.commitIndex {
+//			panic("lastApplied > commitIndex")
+//		}
+//		for sm.commitIndex == sm.lastApplied {
+//			sm.applyCond.Wait()
+//		}
+//		info := sm.tryApply()
+//		sm.applyCond.L.Unlock()
+//		if info != nil {
+//			sm.applyGiven(info.entries, info.begin, info.isLeader, info.term, info.stateSize)
+//		}
+//	}
+//}
+
+//func (sm *RaftStateMachine) applyGiven(entries []LogEntry, begin int, isLeader bool, term int, stateSize int) {
+//	for i, entry := range entries {
+//		sm.rwmu.RLock()
+//		sm.raft.print("applying index %d", begin+i)
+//		sm.rwmu.RUnlock()
+//		sm.applyCh <- ApplyMsg{
+//			CommandValid: true,
+//			Command:      entry.Command,
+//			CommandIndex: begin + i,
+//			IsLeader:     isLeader,
+//			Term:         term,
+//			StateSize:    stateSize,
+//		}
+//	}
+//}
 
 // apply must be in order
 // it might be that each time commitIndex is increased
@@ -69,22 +106,35 @@ func (sm *RaftStateMachine) applyGiven(entries []LogEntry, begin int, isLeader b
 // if it is called too frequently
 // the execution may overlap
 // thus causing application out of order
-func (sm *RaftStateMachine) tryApply() *_ApplyInfo {
-	applyLen := sm.commitIndex - sm.lastApplied
-	if applyLen > 0 {
-		//sm.raft.print("applying %d entries", applyLen)
-		toBeSent := make([]LogEntry, sm.commitIndex-sm.lastApplied)
-		copy(toBeSent, sm.log[sm.physicalIndex(sm.lastApplied+1):sm.physicalIndex(sm.commitIndex+1)])
-		begin := sm.lastApplied + 1
-		sm.lastApplied = sm.commitIndex
-		return &_ApplyInfo{
-			entries:  toBeSent,
-			begin:    begin,
-			isLeader: sm.curState == sendAEState,
-			term:     sm.currentTerm,
-		}
+func (sm *RaftStateMachine) tryApply() {
+	for i := sm.lastApplied + 1; i <= sm.commitIndex; i++ {
+		sm.raft.print("sending index %d to applyQ", i)
+		sm.sendToApplyQ(&ApplyMsg{
+			CommandValid: true,
+			Command:      sm.getEntry(i).Command,
+			CommandIndex: i,
+			IsLeader:     sm.curState == sendAEState,
+			Term:         sm.currentTerm,
+			StateSize:    sm.raft.persister.RaftStateSize(),
+		})
 	}
-	return nil
+	sm.lastApplied = sm.commitIndex
+	//applyLen := sm.commitIndex - sm.lastApplied
+	//if applyLen > 0 {
+	//	//sm.raft.print("applying %d entries", applyLen)
+	//	toBeSent := make([]LogEntry, sm.commitIndex-sm.lastApplied)
+	//	copy(toBeSent, sm.log[sm.physicalIndex(sm.lastApplied+1):sm.physicalIndex(sm.commitIndex+1)])
+	//	begin := sm.lastApplied + 1
+	//	sm.lastApplied = sm.commitIndex
+	//	return &_ApplyInfo{
+	//		entries:   toBeSent,
+	//		begin:     begin,
+	//		isLeader:  sm.curState == sendAEState,
+	//		term:      sm.currentTerm,
+	//		stateSize: sm.raft.persister.RaftStateSize(),
+	//	}
+	//}
+	//return nil
 }
 
 func (trans *NewAE) transfer(source SMState) SMState {
@@ -107,8 +157,8 @@ func (trans *NewAE) transfer(source SMState) SMState {
 			trans.machine.commitIndex = trans.leaderCommit
 		}
 	}
-	//trans.machine.tryApply()
-	trans.machine.applyCond.Broadcast()
+	trans.machine.tryApply()
+	//trans.machine.applyCond.Broadcast()
 
 	trans.machine.raft.persist()
 

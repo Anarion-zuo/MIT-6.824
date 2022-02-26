@@ -91,7 +91,6 @@ func (sm *RaftStateMachine) tryCommit() {
 	if sm.commitIndex > oldCommit {
 		sm.raft.print("commitIndex updated")
 		//sm.issueTransfer(sm.raft.makeApplyNew())
-		//sm.tryApply()
-		sm.applyCond.Broadcast()
+		sm.tryApply()
 	}
 }

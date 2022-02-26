@@ -155,7 +155,5 @@ func (sm *RaftStateMachine) notifyServiceIS(index int) {
 		SnapshotTerm:  sm.getEntry(index).Term,
 		SnapshotIndex: index,
 	}
-	go func() {
-		*sm.applyCh <- *msg
-	}()
+	sm.sendToApplyQ(&msg)
 }

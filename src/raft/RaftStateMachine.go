@@ -1,6 +1,8 @@
 package raft
 
 import (
+	"container/list"
+	"github.com/sasha-s/go-deadlock"
 	"log"
 	"sync"
 )
@@ -17,6 +19,7 @@ type RaftStateMachine struct {
 	lastApplied int
 	applyCh     chan ApplyMsg
 	applyCond   *sync.Cond
+	applyQ      *list.List
 
 	// volatile
 	nextIndex  []int
@@ -76,10 +79,11 @@ func (rf *Raft) initStateMachine(applyCh chan ApplyMsg) {
 		nextIndex:   make([]int, rf.PeerCount()),
 		matchIndex:  make([]int, rf.PeerCount()),
 		applyCh:     applyCh,
+		applyCond:   sync.NewCond(&deadlock.Mutex{}),
+		applyQ:      list.New(),
 	}
-	rf.stateMachine.applyCond = sync.NewCond(&rf.stateMachine.rwmu)
 	rf.stateMachine.registerStates()
-	go rf.stateMachine.applyRoutine()
+	go rf.stateMachine.pollApplyQRoutine()
 }
 
 const startElectionState SMState = 900
