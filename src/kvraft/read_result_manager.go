@@ -5,12 +5,12 @@ import (
 )
 
 type ExecutionResult struct {
-	executed  bool
-	timeout   bool
-	hasKey    bool
-	vi        ValueIndex
-	notLeader bool
-	term      int
+	Executed  bool
+	Timeout   bool
+	HasKey    bool
+	Vi        ValueIndex
+	NotLeader bool
+	Term      int
 }
 
 type ResultManager struct {
@@ -34,7 +34,7 @@ func makeCondManager() *ResultManager {
 //		cond:     cond,
 //		executed: false,
 //		timeout:  false,
-//		hasKey:   false,
+//		HasKey:   false,
 //	}
 //	return id, cond
 //}
@@ -73,17 +73,17 @@ func (kv *KVServer) readKV(key string, clerkId int, opId int) *ExecutionResult {
 	}
 	// must perform read
 	result := &ExecutionResult{
-		executed:  true,
-		timeout:   false,
-		hasKey:    false,
-		vi:        ValueIndex{},
-		notLeader: false,
+		Executed:  true,
+		Timeout:   false,
+		HasKey:    false,
+		Vi:        ValueIndex{},
+		NotLeader: false,
 	}
 	kv.mapRwmu.RLock()
 	vip := kv.kvMap[key]
 	if vip != nil {
-		result.hasKey = true
-		result.vi = *vip
+		result.HasKey = true
+		result.Vi = *vip
 	}
 	kv.mapRwmu.RUnlock()
 	kv.resultManager.insertNewResult(clerkId, opId, result)

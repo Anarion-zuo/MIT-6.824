@@ -88,11 +88,11 @@ func (kv *KVServer) print(format string, vars ...interface{}) {
 
 func (kv *KVServer) writeKV(key string, value string, overwrite bool, clerkId int, opId int) *ExecutionResult {
 	result := &ExecutionResult{
-		executed:  true,
-		timeout:   false,
-		hasKey:    true,
-		vi:        ValueIndex{},
-		notLeader: false,
+		Executed:  true,
+		Timeout:   false,
+		HasKey:    true,
+		Vi:        ValueIndex{},
+		NotLeader: false,
 	}
 	kv.mapRwmu.Lock()
 	defer kv.mapRwmu.Unlock()
@@ -133,10 +133,10 @@ func (kv *KVServer) executeApplied(cmd interface{}, index int, term int, isLeade
 			kv.opWaitSet.doneOp(index, &ExecutionResult{
 				executed:  false,
 				timeout:   false,
-				hasKey:    false,
-				vi:        ValueIndex{},
-				notLeader: true,
-				term:      term,
+				HasKey:    false,
+				Vi:        ValueIndex{},
+				NotLeader: true,
+				Term:      Term,
 			})
 			kv.print("opid %d clerk %d at index %d notified rpc handler not leader", op.OpId, op.ClerkId, index)
 			return
@@ -151,7 +151,7 @@ func (kv *KVServer) executeApplied(cmd interface{}, index int, term int, isLeade
 	default:
 		panic("try to execute unkown operation")
 	}
-	result.term = term
+	result.Term = term
 	kv.prepareCondMu.Lock()
 	kv.opWaitSet.doneOp(index, result)
 	kv.prepareCondMu.Unlock()
@@ -198,11 +198,11 @@ func (kv *KVServer) setOpTimeout(recvId int) {
 		time.Sleep(time.Duration(startTimeoutMs) * time.Millisecond)
 		kv.print("timeout triggered for recvid %d", recvId)
 		kv.opWaitSet.doneOp(recvId, &ExecutionResult{
-			executed: false,
-			timeout:  true,
-			hasKey:   false,
-			vi:       ValueIndex{},
-			term:     -1,
+			Executed: false,
+			Timeout:  true,
+			HasKey:   false,
+			Vi:       ValueIndex{},
+			Term:     -1,
 		})
 	}()
 }
@@ -219,15 +219,15 @@ func (kv *KVServer) callRaftStart(args *KvCommandArgs) (*Op, int, int, bool) {
 }
 
 func (kv *KVServer) setGetReplyErr(result *ExecutionResult, reply *KvCommandReply) {
-	if result.notLeader {
+	if result.NotLeader {
 		reply.Err = ErrWrongLeader
-	} else if result.timeout {
+	} else if result.Timeout {
 		reply.Err = ErrNotCommitted
-	} else if !result.hasKey {
+	} else if !result.HasKey {
 		reply.Err = ErrNoKey
-	} else if result.executed {
+	} else if result.Executed {
 		reply.Err = OK
-		reply.Value = result.vi.Value
+		reply.Value = result.Vi.Value
 	} else {
 		panic("operation reported in undefined state")
 	}
@@ -245,17 +245,17 @@ func (kv *KVServer) Get(args *KvCommandArgs, reply *KvCommandReply) {
 	// wait for completion
 	kv.setOpTimeout(index)
 	result := kv.opWaitSet.waitOp(index)
-	reply.Term = result.term
-	kv.print("opid %d clerk %d at index %d Get wait done timeout %t", op.OpId, op.ClerkId, index, result.timeout)
+	reply.Term = result.Term
+	kv.print("opid %d clerk %d at index %d Get wait done timeout %t", op.OpId, op.ClerkId, index, result.Timeout)
 	kv.setGetReplyErr(result, reply)
 }
 
 func (kv *KVServer) setPutAppendReplyErr(result *ExecutionResult, reply *KvCommandReply) {
-	if result.notLeader {
+	if result.NotLeader {
 		reply.Err = ErrWrongLeader
-	} else if result.timeout {
+	} else if result.Timeout {
 		reply.Err = ErrNotCommitted
-	} else if result.executed {
+	} else if result.Executed {
 		reply.Err = OK
 	} else {
 		panic("operation reported in undefined state")
@@ -274,8 +274,8 @@ func (kv *KVServer) PutAppend(args *KvCommandArgs, reply *KvCommandReply) {
 	// wait for completion
 	kv.setOpTimeout(index)
 	result := kv.opWaitSet.waitOp(index)
-	reply.Term = result.term
-	kv.print("opid %d clerk %d index %d timeout %t", op.OpId, op.ClerkId, index, result.timeout)
+	reply.Term = result.Term
+	kv.print("opid %d clerk %d index %d timeout %t", op.OpId, op.ClerkId, index, result.Timeout)
 	kv.setPutAppendReplyErr(result, reply)
 }
 
