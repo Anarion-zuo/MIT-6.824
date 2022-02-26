@@ -167,12 +167,10 @@ func (kv *KVServer) pollApplyChRoutine() {
 			if kv.maxraftstate > 0 && msg.StateSize > kv.maxraftstate {
 				kv.issueSnapshot(msg.Term, msg.CommandIndex)
 			}
-		} else if msg.SnapshotValid {
+		}
+		if msg.SnapshotValid {
 			kv.print("raft applied snapshot at index %d", msg.SnapshotIndex)
 			kv.executeSnapshot(msg.SnapshotIndex, msg.Snapshot)
-		} else {
-			// both not valid
-
 		}
 	}
 }
@@ -327,15 +325,16 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-	snapshotMsg := <-kv.applyCh
+	kv.print("raft initialized")
+	//snapshotMsg := <-kv.applyCh
 	kv.kvMap = make(map[string]*ValueIndex)
 	kv.resultManager = makeResultManager()
-	if snapshotMsg.SnapshotValid && len(snapshotMsg.Snapshot) > 0 {
-		kv.print("init with snapshot index %d term %d length %d", snapshotMsg.SnapshotIndex, snapshotMsg.SnapshotTerm, len(snapshotMsg.Snapshot))
-		kv.readSnapshot(snapshotMsg.Snapshot)
-	} else {
-
-	}
+	//if snapshotMsg.SnapshotValid && len(snapshotMsg.Snapshot) > 0 {
+	//	kv.print("init with snapshot index %d term %d length %d", snapshotMsg.SnapshotIndex, snapshotMsg.SnapshotTerm, len(snapshotMsg.Snapshot))
+	//	kv.readSnapshot(snapshotMsg.Snapshot)
+	//} else {
+	//
+	//}
 
 	// You may need initialization code here.
 

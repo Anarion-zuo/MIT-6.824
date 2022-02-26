@@ -57,10 +57,11 @@ func (sm *RaftStateMachine) pollApplyQRoutine() {
 		sm.rwmu.RLock()
 		if msg.CommandValid {
 			sm.raft.print("applying command index %d", msg.CommandIndex)
-		} else if msg.SnapshotValid {
+		}
+		if msg.SnapshotValid {
 			sm.raft.print("applying snapshot index %d", msg.SnapshotIndex)
 		} else {
-			panic("unknown apply type")
+			//panic("unknown apply type")
 		}
 		sm.rwmu.RUnlock()
 		sm.applyCh <- *msg
