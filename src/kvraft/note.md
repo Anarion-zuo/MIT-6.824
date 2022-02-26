@@ -22,6 +22,10 @@ An attempted scheme is described in the next paragraph. This is not a correct im
 
 When a new command is issued by a clerk, it tells that the command was executed at log index -1, which is not executed at all. The server replies a possible executed index to the clerk. In a reissueing of the same command, the clerk tells the server this index repeatedly. The server would send the command and its executed index to raft. If raft decides to commit the command, the server checks whether the command is executed before. If the index associated to the command is -1, or is less than the maximum index of the currently executed commands, the server would execute it.
 
+## TestOnePartition
+
+Must not set timeout to too large a value or this would not pass.
+
 ## read issue
 
 Get rpc must be handled in much the same way as PutAppend. If the rpc handler reads from kv and returns the read state immediately, it might observe a state before previous PutAppend rpcs run through. It must wait for commitIndex to grow, and the best way of doing this is to have itself inserted into raft.
