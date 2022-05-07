@@ -1,4 +1,4 @@
-package kvraft
+package raftservice
 
 import (
 	"github.com/sasha-s/go-deadlock"
@@ -8,7 +8,13 @@ import (
 type _OpWaiter struct {
 	cond   *sync.Cond
 	done   bool
-	result *ExecutionResult
+	result OpResult
+}
+
+type OpResult struct {
+	Result interface{}
+	Valid  bool
+	Term   int
 }
 
 type OpWaitSet struct {
@@ -16,7 +22,7 @@ type OpWaitSet struct {
 	rwmu      deadlock.RWMutex
 }
 
-func makeOpWaitSet() *OpWaitSet {
+func MakeOpWaitSet() *OpWaitSet {
 	return &OpWaitSet{
 		waiterMap: make(map[int]*_OpWaiter),
 	}
@@ -25,7 +31,7 @@ func makeOpWaitSet() *OpWaitSet {
 const addRedundentCount int = 20
 
 // use commitIndex as recvId
-func (s *OpWaitSet) addOpWait(recvId int) {
+func (s *OpWaitSet) AddOpWait(recvId int) {
 	s.rwmu.Lock()
 	if s.waiterMap[recvId] == nil {
 		// allocate some cond for future adds
@@ -52,7 +58,7 @@ func (s *OpWaitSet) removeOpWait(recvId int) {
 	s.rwmu.Unlock()
 }
 
-func (s *OpWaitSet) waitOp(recvId int) *ExecutionResult {
+func (s *OpWaitSet) WaitOp(recvId int) interface{} {
 	s.rwmu.RLock()
 	waiter := s.waiterMap[recvId]
 	s.rwmu.RUnlock()
@@ -64,10 +70,13 @@ func (s *OpWaitSet) waitOp(recvId int) *ExecutionResult {
 	for !waiter.done {
 		waiter.cond.Wait()
 	}
-	return waiter.result
+	if !waiter.result.Valid {
+		return nil
+	}
+	return waiter.result.Result
 }
 
-func (s *OpWaitSet) doneOp(recvId int, result *ExecutionResult) {
+func (s *OpWaitSet) DoneOp(recvId int, result interface{}, valid bool, term int) {
 	s.rwmu.RLock()
 	waiter := s.waiterMap[recvId]
 	s.rwmu.RUnlock()
@@ -78,6 +87,10 @@ func (s *OpWaitSet) doneOp(recvId int, result *ExecutionResult) {
 	waiter.cond.L.Lock()
 	defer waiter.cond.L.Unlock()
 	waiter.done = true
-	waiter.result = result
+	waiter.result = OpResult{
+		Result: result,
+		Valid:  valid,
+		Term:   term,
+	}
 	waiter.cond.Broadcast()
 }

@@ -4,13 +4,10 @@ import (
 	"6.824/labgob"
 	"6.824/labrpc"
 	"6.824/raft"
-	"fmt"
+	"6.824/raftservice"
 	"github.com/sasha-s/go-deadlock"
 	"log"
 	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const Debug = true
@@ -36,22 +33,14 @@ type Op struct {
 }
 
 type KVServer struct {
-	mu      sync.Mutex
-	me      int
-	rf      *raft.Raft
-	applyCh chan raft.ApplyMsg
-	dead    int32 // set by Kill()
-
-	maxraftstate int // snapshot if log grows this big
+	rf         *raft.Raft
+	raftServer *raftservice.RaftServer
 
 	// Your definitions here.
 	kvMap         map[string]*ValueIndex
 	mapRwmu       deadlock.RWMutex
 	resultManager *ResultManager
-	opWaitSet     *OpWaitSet
 
-	//persister         *KvPersister
-	//committedVersions map[int][]byte
 	versionMutex deadlock.Mutex
 
 	// lock when calling Raft.Start
@@ -80,10 +69,7 @@ func (old *ValueIndex) checkWriteExecutedBefore(clerkId int, opId int) bool {
 }
 
 func (kv *KVServer) print(format string, vars ...interface{}) {
-	if Debug {
-		s := fmt.Sprintf(format, vars...)
-		fmt.Printf("kvserver %d | %s\n", kv.me, s)
-	}
+	kv.raftServer.Print(format, vars...)
 }
 
 func (kv *KVServer) writeKV(key string, value string, overwrite bool, clerkId int, opId int) *ExecutionResult {
@@ -121,7 +107,7 @@ func (kv *KVServer) writeKV(key string, value string, overwrite bool, clerkId in
 	return result
 }
 
-func (kv *KVServer) executeApplied(cmd interface{}, index int, term int, isLeader bool) {
+func (kv *KVServer) executeApplied(cmd interface{}, index int, term int, isLeader bool) *raftservice.OpResult {
 	op := cmd.(Op)
 	//kv.mapRwmu.Lock()
 	//defer kv.mapRwmu.Unlock()
@@ -129,53 +115,22 @@ func (kv *KVServer) executeApplied(cmd interface{}, index int, term int, isLeade
 	switch op.Command {
 	case GetCommand:
 		// should a non-leader return Get?
-		/*if !isLeader {
-			kv.opWaitSet.doneOp(index, &ExecutionResult{
-				executed:  false,
-				timeout:   false,
-				HasKey:    false,
-				Vi:        ValueIndex{},
-				NotLeader: true,
-				Term:      Term,
-			})
-			kv.print("opid %d clerk %d at index %d notified rpc handler not leader", op.OpId, op.ClerkId, index)
-			return
-		}*/
-		kv.print("execute Get key %s opid %d clerk %d at index %d", op.Key, op.OpId, op.ClerkId, index)
+		kv.print("execute Get key [%s] opid %d clerk %d at index %d", op.Key, op.OpId, op.ClerkId, index)
 		result = kv.readKV(op.Key, op.ClerkId, op.OpId)
 		break
 	case PutAppendCommand:
-		kv.print("execute PutAppend key %s value %s overwrite %t from clerk %d opid %d at index %d", op.Key, op.Value, op.Overwrite, op.ClerkId, op.OpId, index)
+		kv.print("execute PutAppend key [%s] value [%s] overwrite %t from clerk %d opid %d at index %d", op.Key, op.Value, op.Overwrite, op.ClerkId, op.OpId, index)
 		result = kv.writeKV(op.Key, op.Value, op.Overwrite, op.ClerkId, op.OpId)
 		break
 	default:
 		panic("try to execute unkown operation")
 	}
-	result.Term = term
-	kv.prepareCondMu.Lock()
-	kv.opWaitSet.doneOp(index, result)
-	kv.prepareCondMu.Unlock()
-	//kv.print("opid %d clerk %d recvid %d at index %d term %d notified rpc handler", op.OpId, op.ClerkId, op.RecvId, index, term)
-}
-
-func (kv *KVServer) pollApplyChRoutine() {
-	for {
-		msg := <-kv.applyCh
-		//kv.print("ApplyMsg CommandValid %t SnapshotValid %t", msg.CommandValid, msg.SnapshotValid)
-		if msg.CommandValid {
-			kv.executeApplied(msg.Command, msg.CommandIndex, msg.Term, msg.IsLeader)
-			if kv.maxraftstate > 0 && msg.StateSize > kv.maxraftstate {
-				kv.issueSnapshot(msg.Term, msg.CommandIndex)
-			}
-		}
-		if msg.SnapshotValid {
-			kv.print("raft applied snapshot at index %d", msg.SnapshotIndex)
-			kv.executeSnapshot(msg.SnapshotIndex, msg.Snapshot)
-		}
+	return &raftservice.OpResult{
+		Result: result,
+		Valid:  true,
+		Term:   term,
 	}
 }
-
-const startTimeoutMs int = 300
 
 func (kv *KVServer) makeOp(args *KvCommandArgs) *Op {
 	result := &Op{
@@ -186,39 +141,12 @@ func (kv *KVServer) makeOp(args *KvCommandArgs) *Op {
 		ClerkId:   args.MyId,
 		OpId:      args.OpId,
 	}
-	//kv.print("make opid %d clerk %d recvid %d key %s value %s overwrite %t", result.OpId, result.ClerkId, result.RecvId, result.Key, result.Value, result.Overwrite)
+	//kv.print("make opid %d clerk %d recvid %d key [%s] value [%s] overwrite %t", result.OpId, result.ClerkId, result.RecvId, result.Key, result.Value, result.Overwrite)
 	return result
 }
 
-func (kv *KVServer) setOpTimeout(recvId int) {
-	go func() {
-		time.Sleep(time.Duration(startTimeoutMs) * time.Millisecond)
-		//kv.print("timeout triggered for recvid %d", recvId)
-		kv.opWaitSet.doneOp(recvId, &ExecutionResult{
-			Executed: false,
-			Timeout:  true,
-			HasKey:   false,
-			Vi:       ValueIndex{},
-			Term:     -1,
-		})
-	}()
-}
-
-func (kv *KVServer) callRaftStart(args *KvCommandArgs) (*Op, int, int, bool) {
-	op := kv.makeOp(args)
-	kv.prepareCondMu.Lock()
-	defer kv.prepareCondMu.Unlock()
-	index, term, isLeader := kv.rf.Start(*op)
-	if isLeader {
-		kv.opWaitSet.addOpWait(index)
-	}
-	return op, index, term, isLeader
-}
-
-func (kv *KVServer) setGetReplyErr(result *ExecutionResult, reply *KvCommandReply) {
-	if result.NotLeader {
-		reply.Err = ErrWrongLeader
-	} else if result.Timeout {
+func (kv *KVServer) setGetReplyErr(result *ExecutionResult, reply *KvCommandReply, timeout bool) {
+	if timeout {
 		reply.Err = ErrNotCommitted
 	} else if !result.HasKey {
 		reply.Err = ErrNoKey
@@ -232,25 +160,25 @@ func (kv *KVServer) setGetReplyErr(result *ExecutionResult, reply *KvCommandRepl
 
 func (kv *KVServer) Get(args *KvCommandArgs, reply *KvCommandReply) {
 	// Your code here.
-	op, index, _, isLeader := kv.callRaftStart(args)
-	if !isLeader {
+	reply.IsLeader = true
+	kv.raftServer.IssueCall(*kv.makeOp(args), func() {
+		reply.IsLeader = false
 		reply.Err = ErrWrongLeader
-		return
-	}
-	reply.CommitIndex = index
-	kv.print("opid %d Get clerk %d index %d key %s sent to raft", op.OpId, op.ClerkId, index, op.Key)
-	// wait for completion
-	kv.setOpTimeout(index)
-	result := kv.opWaitSet.waitOp(index)
-	reply.Term = result.Term
-	kv.print("opid %d clerk %d at index %d Get wait done timeout %t", op.OpId, op.ClerkId, index, result.Timeout)
-	kv.setGetReplyErr(result, reply)
+	}, func(_op interface{}, index int, term int) {
+		op := _op.(Op)
+		kv.print("opid %d clerk %d at index %d Get wait done timeout true", op.OpId, op.ClerkId, index)
+		kv.setGetReplyErr(nil, reply, true)
+	}, func(result *raftservice.OpResult, _op interface{}, index int, term int) {
+		op := _op.(Op)
+		reply.Term = term
+		reply.CommitIndex = index
+		kv.setGetReplyErr(result.Result.(*ExecutionResult), reply, false)
+		kv.print("opid %d clerk %d at index %d Get wait done timeout false", op.OpId, op.ClerkId, index)
+	})
 }
 
-func (kv *KVServer) setPutAppendReplyErr(result *ExecutionResult, reply *KvCommandReply) {
-	if result.NotLeader {
-		reply.Err = ErrWrongLeader
-	} else if result.Timeout {
+func (kv *KVServer) setPutAppendReplyErr(result *ExecutionResult, reply *KvCommandReply, timeout bool) {
+	if timeout {
 		reply.Err = ErrNotCommitted
 	} else if result.Executed {
 		reply.Err = OK
@@ -261,19 +189,21 @@ func (kv *KVServer) setPutAppendReplyErr(result *ExecutionResult, reply *KvComma
 
 func (kv *KVServer) PutAppend(args *KvCommandArgs, reply *KvCommandReply) {
 	// Your code here.
-	op, index, _, isLeader := kv.callRaftStart(args)
-	if !isLeader {
+	reply.IsLeader = true
+	kv.raftServer.IssueCall(*kv.makeOp(args), func() {
+		reply.IsLeader = false
 		reply.Err = ErrWrongLeader
-		return
-	}
-	reply.CommitIndex = index
-	kv.print("opid %d PutAppend clerk %d index %d key %s val %s sent to raft", op.OpId, op.ClerkId, index, op.Key, op.Value)
-	// wait for completion
-	kv.setOpTimeout(index)
-	result := kv.opWaitSet.waitOp(index)
-	reply.Term = result.Term
-	kv.print("opid %d clerk %d index %d timeout %t", op.OpId, op.ClerkId, index, result.Timeout)
-	kv.setPutAppendReplyErr(result, reply)
+	}, func(_op interface{}, index int, term int) {
+		op := _op.(Op)
+		kv.print("opid %d clerk %d at index %d PutAppend wait done timeout true", op.OpId, op.ClerkId, index)
+		kv.setPutAppendReplyErr(nil, reply, true)
+	}, func(result *raftservice.OpResult, _op interface{}, index int, term int) {
+		op := _op.(Op)
+		reply.Term = term
+		reply.CommitIndex = index
+		kv.setGetReplyErr(result.Result.(*ExecutionResult), reply, false)
+		kv.print("opid %d clerk %d at index %d PutAppend wait done timeout false", op.OpId, op.ClerkId, index)
+	})
 }
 
 //
@@ -287,15 +217,11 @@ func (kv *KVServer) PutAppend(args *KvCommandArgs, reply *KvCommandReply) {
 // to suppress debug output from a Kill()ed instance.
 //
 func (kv *KVServer) Kill() {
-	atomic.StoreInt32(&kv.dead, 1)
-	kv.rf.Kill()
-	// Your code here, if desired.
-	kv.print("killed by host")
+	kv.raftServer.Kill()
 }
 
 func (kv *KVServer) killed() bool {
-	z := atomic.LoadInt32(&kv.dead)
-	return z == 1
+	return kv.raftServer.Killed()
 }
 
 //
@@ -318,32 +244,17 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	labgob.Register(Op{})
 
 	kv := new(KVServer)
-	kv.me = me
-	kv.maxraftstate = maxraftstate
 
-	// You may need initialization code here.
+	kv.raftServer = raftservice.MakeRaftServer(servers, me, persister, maxraftstate)
+	kv.rf = kv.raftServer.Raft()
 
-	kv.applyCh = make(chan raft.ApplyMsg)
-	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+	//kv.applyCh = make(chan raft.ApplyMsg)
 	kv.print("raft initialized")
-	//snapshotMsg := <-kv.applyCh
 	kv.kvMap = make(map[string]*ValueIndex)
 	kv.resultManager = makeResultManager()
-	//if snapshotMsg.SnapshotValid && len(snapshotMsg.Snapshot) > 0 {
-	//	kv.print("init with snapshot index %d term %d length %d", snapshotMsg.SnapshotIndex, snapshotMsg.SnapshotTerm, len(snapshotMsg.Snapshot))
-	//	kv.readSnapshot(snapshotMsg.Snapshot)
-	//} else {
-	//
-	//}
-
-	// You may need initialization code here.
-
-	//kv.committedVersions = make(map[int][]byte)
-	kv.opWaitSet = makeOpWaitSet()
-	//kv.initKvPersister()
 
 	kv.print("kvserver %d initialized", me)
-	go kv.pollApplyChRoutine()
+	go kv.raftServer.PollApplyChRoutine(kv.executeApplied, kv.issueSnapshot, kv.executeSnapshot)
 
 	return kv
 }
