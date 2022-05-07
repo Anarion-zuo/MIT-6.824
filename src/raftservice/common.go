@@ -20,3 +20,9 @@ type RpcReply interface {
 	GetIsLeader() bool
 	SetIsLeader(bool)
 }
+
+type RaftOp interface {
+	GetOpId() int
+	GetMyId() int
+	CannotRepeat() bool
+}

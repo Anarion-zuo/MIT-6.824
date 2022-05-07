@@ -1,14 +1,22 @@
 package raftservice
 
 import (
+	"6.824/labgob"
 	"6.824/labrpc"
 	"6.824/raft"
+	"bytes"
 	"fmt"
 	"github.com/sasha-s/go-deadlock"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+type OpIdRecord struct {
+	LatestOpId  int
+	Term        int
+	CommitIndex int
+}
 
 type RaftServer struct {
 	mu           sync.Mutex
@@ -22,6 +30,8 @@ type RaftServer struct {
 	// lock when calling Raft.Start
 	// to prevent server from not finding conds for ops
 	prepareCondMu deadlock.Mutex
+	opIdMapMu     deadlock.Mutex
+	latestOpIdMap map[int]*OpIdRecord // maps each opid to its
 
 	printFlag bool
 }
@@ -37,9 +47,38 @@ func (rs *RaftServer) Print(format string, vars ...interface{}) {
 	}
 }
 
-func (rs *RaftServer) callStart(op interface{}) (int, int, bool) {
+func (rs *RaftServer) TakeSnapshot() (*bytes.Buffer, *labgob.LabEncoder) {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	rs.opIdMapMu.Lock()
+	err := e.Encode(rs.latestOpIdMap)
+	rs.opIdMapMu.Unlock()
+	if err != nil {
+		panic(err)
+	}
+	return w, e
+}
+
+func (rs *RaftServer) ReadSnapshot(buffer []byte) (*bytes.Buffer, *labgob.LabDecoder) {
+	r := bytes.NewBuffer(buffer)
+	d := labgob.NewDecoder(r)
+	if len(buffer) <= 0 {
+		rs.latestOpIdMap = make(map[int]*OpIdRecord)
+		return r, d
+	}
+	rs.opIdMapMu.Lock()
+	err := d.Decode(&rs.latestOpIdMap)
+	rs.opIdMapMu.Unlock()
+	if err != nil {
+		panic(err)
+	}
+	return r, d
+}
+
+func (rs *RaftServer) callStart(op RaftOp) (int, int, bool) {
 	rs.prepareCondMu.Lock()
 	defer rs.prepareCondMu.Unlock()
+	//rs.Print("start op type %v", reflect.TypeOf(op))
 	index, term, isLeader := rs.rf.Start(op)
 	if isLeader {
 		rs.opWaitSet.AddOpWait(index)
@@ -66,13 +105,13 @@ func (rs *RaftServer) OpComplete(recvId int, result interface{}, term int) {
 	rs.opWaitSet.DoneOp(recvId, result, true, term)
 }
 
-type applyFn func(interface{}, int, int, bool) *OpResult
+type applyFn func(RaftOp, int, int, bool) *OpResult
 
 type snapshotApplyFn func(int, []byte)
 
 type snapshotIssueFn func(int, int)
 
-func (rs *RaftServer) ExecuteApplied(cmd interface{}, index int, term int, isLeader bool, executor applyFn) {
+func (rs *RaftServer) ExecuteApplied(cmd RaftOp, index int, term int, isLeader bool, executor applyFn) {
 	result := executor(cmd, index, term, isLeader)
 	result.Term = term
 	rs.prepareCondMu.Lock()
@@ -86,7 +125,7 @@ func (rs *RaftServer) PollApplyChRoutine(executeApplied applyFn, snapshotIssue s
 		msg := <-rs.applyCh
 		//kv.print("ApplyMsg CommandValid %t SnapshotValid %t", msg.CommandValid, msg.SnapshotValid)
 		if msg.CommandValid {
-			rs.ExecuteApplied(msg.Command, msg.CommandIndex, msg.Term, msg.IsLeader, executeApplied)
+			rs.ExecuteApplied(msg.Command.(RaftOp), msg.CommandIndex, msg.Term, msg.IsLeader, executeApplied)
 			if rs.maxraftstate > 0 && msg.StateSize > rs.maxraftstate {
 				snapshotIssue(msg.Term, msg.CommandIndex)
 			}
@@ -98,9 +137,18 @@ func (rs *RaftServer) PollApplyChRoutine(executeApplied applyFn, snapshotIssue s
 	}
 }
 
-func (rs *RaftServer) IssueCall(op interface{}, notLeaderFn func(),
-	timeoutFn func(op interface{}, index int, term int),
-	notTimeoutFn func(result *OpResult, op interface{}, index int, term int)) {
+func (rs *RaftServer) IssueCall(op RaftOp, notLeaderFn func(),
+	timeoutFn func(op RaftOp, index int, term int),
+	notTimeoutFn func(result *OpResult, op RaftOp, index int, term int),
+	repeatedFn func(op RaftOp, term int, commitIndex int)) {
+	raftOp := op
+	rs.opIdMapMu.Lock()
+	record := rs.latestOpIdMap[raftOp.GetMyId()]
+	rs.opIdMapMu.Unlock()
+	if record != nil && raftOp.CannotRepeat() && record.LatestOpId >= raftOp.GetOpId() {
+		repeatedFn(op, record.Term, record.CommitIndex)
+		return
+	}
 	index, term, isLeader := rs.callStart(op)
 	if !isLeader {
 		notLeaderFn()
@@ -112,6 +160,15 @@ func (rs *RaftServer) IssueCall(op interface{}, notLeaderFn func(),
 	if result == nil {
 		timeoutFn(op, index, term)
 	} else {
+		if raftOp.CannotRepeat() {
+			rs.opIdMapMu.Lock()
+			rs.latestOpIdMap[raftOp.GetMyId()] = &OpIdRecord{
+				LatestOpId:  raftOp.GetOpId(),
+				Term:        term,
+				CommitIndex: index,
+			}
+			rs.opIdMapMu.Unlock()
+		}
 		notTimeoutFn(result.(*OpResult), op, index, term)
 	}
 }
@@ -145,6 +202,7 @@ func MakeRaftServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persist
 
 	rs.applyCh = make(chan raft.ApplyMsg)
 	rs.rf = raft.Make(servers, me, persister, rs.applyCh)
+	rs.latestOpIdMap = make(map[int]*OpIdRecord)
 	rs.Print("raft initialized")
 
 	rs.opWaitSet = MakeOpWaitSet()

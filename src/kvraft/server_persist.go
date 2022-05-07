@@ -1,10 +1,5 @@
 package kvraft
 
-import (
-	"6.824/labgob"
-	"bytes"
-)
-
 //type KvPersister struct {
 //	mu   deadlock.Mutex
 //	data []byte
@@ -48,8 +43,7 @@ import (
 //}
 
 func (kv *KVServer) takeSnapshot() []byte {
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
+	w, e := kv.raftServer.TakeSnapshot()
 	err := e.Encode(kv.kvMap)
 	if err != nil {
 		panic(err)
@@ -62,13 +56,12 @@ func (kv *KVServer) takeSnapshot() []byte {
 }
 
 func (kv *KVServer) readSnapshot(buffer []byte) {
+	_, d := kv.raftServer.ReadSnapshot(buffer)
 	if len(buffer) <= 0 {
 		kv.kvMap = make(map[string]*ValueIndex)
 		kv.resultManager = makeResultManager()
 		return
 	}
-	r := bytes.NewBuffer(buffer)
-	d := labgob.NewDecoder(r)
 	err := d.Decode(&kv.kvMap)
 	if err != nil {
 		panic(err)

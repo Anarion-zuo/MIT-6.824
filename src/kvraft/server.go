@@ -7,6 +7,7 @@ import (
 	"6.824/raftservice"
 	"github.com/sasha-s/go-deadlock"
 	"log"
+	"reflect"
 	"strings"
 )
 
@@ -20,6 +21,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 }
 
 type Op struct {
+	raftservice.RaftOp
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
@@ -30,6 +32,19 @@ type Op struct {
 
 	ClerkId int
 	OpId    int
+	MyId    int
+}
+
+func (o Op) GetOpId() int {
+	return o.OpId
+}
+
+func (o Op) GetMyId() int {
+	return o.MyId
+}
+
+func (o Op) CannotRepeat() bool {
+	return o.Command == PutAppendCommand
 }
 
 type KVServer struct {
@@ -107,8 +122,16 @@ func (kv *KVServer) writeKV(key string, value string, overwrite bool, clerkId in
 	return result
 }
 
-func (kv *KVServer) executeApplied(cmd interface{}, index int, term int, isLeader bool) *raftservice.OpResult {
-	op := cmd.(Op)
+func (kv *KVServer) executeApplied(cmd raftservice.RaftOp, index int, term int, isLeader bool) *raftservice.OpResult {
+	//kv.print("execute op type %v", reflect.TypeOf(cmd))
+	var op *Op = nil
+	if reflect.TypeOf(cmd) != reflect.TypeOf(&Op{}) {
+		kv.print("what the hell type???")
+		obj := cmd.(Op)
+		op = &obj
+	} else {
+		op = cmd.(*Op)
+	}
 	//kv.mapRwmu.Lock()
 	//defer kv.mapRwmu.Unlock()
 	var result *ExecutionResult = nil
@@ -140,6 +163,7 @@ func (kv *KVServer) makeOp(args *KvCommandArgs) *Op {
 		Overwrite: args.Overwrite,
 		ClerkId:   args.MyId,
 		OpId:      args.OpId,
+		MyId:      args.MyId,
 	}
 	//kv.print("make opid %d clerk %d recvid %d key [%s] value [%s] overwrite %t", result.OpId, result.ClerkId, result.RecvId, result.Key, result.Value, result.Overwrite)
 	return result
@@ -161,20 +185,20 @@ func (kv *KVServer) setGetReplyErr(result *ExecutionResult, reply *KvCommandRepl
 func (kv *KVServer) Get(args *KvCommandArgs, reply *KvCommandReply) {
 	// Your code here.
 	reply.IsLeader = true
-	kv.raftServer.IssueCall(*kv.makeOp(args), func() {
+	kv.raftServer.IssueCall(kv.makeOp(args), func() {
 		reply.IsLeader = false
 		reply.Err = ErrWrongLeader
-	}, func(_op interface{}, index int, term int) {
-		op := _op.(Op)
+	}, func(_op raftservice.RaftOp, index int, term int) {
+		op := _op.(*Op)
 		kv.print("opid %d clerk %d at index %d Get wait done timeout true", op.OpId, op.ClerkId, index)
 		kv.setGetReplyErr(nil, reply, true)
-	}, func(result *raftservice.OpResult, _op interface{}, index int, term int) {
-		op := _op.(Op)
+	}, func(result *raftservice.OpResult, _op raftservice.RaftOp, index int, term int) {
+		op := _op.(*Op)
 		reply.Term = term
 		reply.CommitIndex = index
 		kv.setGetReplyErr(result.Result.(*ExecutionResult), reply, false)
 		kv.print("opid %d clerk %d at index %d Get wait done timeout false", op.OpId, op.ClerkId, index)
-	})
+	}, nil)
 }
 
 func (kv *KVServer) setPutAppendReplyErr(result *ExecutionResult, reply *KvCommandReply, timeout bool) {
@@ -190,19 +214,23 @@ func (kv *KVServer) setPutAppendReplyErr(result *ExecutionResult, reply *KvComma
 func (kv *KVServer) PutAppend(args *KvCommandArgs, reply *KvCommandReply) {
 	// Your code here.
 	reply.IsLeader = true
-	kv.raftServer.IssueCall(*kv.makeOp(args), func() {
+	kv.raftServer.IssueCall(kv.makeOp(args), func() {
 		reply.IsLeader = false
 		reply.Err = ErrWrongLeader
-	}, func(_op interface{}, index int, term int) {
-		op := _op.(Op)
+	}, func(_op raftservice.RaftOp, index int, term int) {
+		op := _op.(*Op)
 		kv.print("opid %d clerk %d at index %d PutAppend wait done timeout true", op.OpId, op.ClerkId, index)
 		kv.setPutAppendReplyErr(nil, reply, true)
-	}, func(result *raftservice.OpResult, _op interface{}, index int, term int) {
-		op := _op.(Op)
+	}, func(result *raftservice.OpResult, _op raftservice.RaftOp, index int, term int) {
+		op := _op.(*Op)
 		reply.Term = term
 		reply.CommitIndex = index
 		kv.setGetReplyErr(result.Result.(*ExecutionResult), reply, false)
 		kv.print("opid %d clerk %d at index %d PutAppend wait done timeout false", op.OpId, op.ClerkId, index)
+	}, func(op raftservice.RaftOp, term int, commitIndex int) {
+		reply.Err = OK
+		reply.Term = term
+		reply.CommitIndex = commitIndex
 	})
 }
 
