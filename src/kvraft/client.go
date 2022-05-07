@@ -2,23 +2,23 @@ package kvraft
 
 import (
 	"6.824/labrpc"
-	"fmt"
-	"github.com/sasha-s/go-deadlock"
+	"6.824/raftservice"
 	"time"
 )
 import "crypto/rand"
 import "math/big"
 
-var globalClerkIdGenerator IdGenerator
+//var globalClerkIdGenerator raftservice.IdGenerator
 
 type Clerk struct {
-	servers []*labrpc.ClientEnd
+	/*servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
-	opIdGenerator IdGenerator
+	opIdGenerator raftservice.IdGenerator
 	myId          int
 	lastLeader    int
 	// lock on lastLeader
-	mu deadlock.Mutex
+	mu deadlock.Mutex*/
+	raftClerk *raftservice.RaftClerk
 }
 
 func nrand() int64 {
@@ -30,36 +30,27 @@ func nrand() int64 {
 
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
-	ck.servers = servers
-	// You'll have to add code here.
-	ck.opIdGenerator.curVal = 1
-	ck.myId = globalClerkIdGenerator.make()
-	ck.mu.Lock()
-	ck.lastLeader = -1
-	ck.mu.Unlock()
-	ck.print("initialized a clerk id %d", ck.myId)
+	ck.raftClerk = raftservice.MakeRaftClerk(servers)
+	ck.print("initialized a clerk id %d", ck.raftClerk.Id())
 	return ck
 }
 
 func (ck *Clerk) print(format string, vars ...interface{}) {
-	if Debug {
-		s := fmt.Sprintf(format, vars...)
-		fmt.Printf("clerk %d | %s\n", ck.myId, s)
-	}
+	ck.raftClerk.Print(format, vars...)
 }
 
-func (ck *Clerk) sendGet(server int, args *KvCommandArgs, reply *KvCommandReply) bool {
+func (ck *Clerk) sendGet(server int, args *KvCommandArgs, reply *KvCommandReply) raftservice.RpcReply {
 	//ck.print("trying to send Get to server %d", server)
-	return ck.servers[server].Call("KVServer.Get", args, reply)
+	return ck.raftClerk.SendRpc(server, "KVServer.Get", args, reply)
 }
 
-func (ck *Clerk) sendPutAppend(server int, args *KvCommandArgs, reply *KvCommandReply) bool {
+func (ck *Clerk) sendPutAppend(server int, args *KvCommandArgs, reply *KvCommandReply) raftservice.RpcReply {
 	//ck.print("trying to send PutAppend to server %d", server)
-	return ck.servers[server].Call("KVServer.PutAppend", args, reply)
+	return ck.raftClerk.SendRpc(server, "KVServer.PutAppend", args, reply)
 }
 
 // reuturns whether server is leader and reachable in the operation
-func (ck *Clerk) sendSingleCommand(getOrNot bool, server int, args *KvCommandArgs, reply *KvCommandReply) bool {
+/*func (ck *Clerk) sendSingleCommand(getOrNot bool, server int, args *KvCommandArgs, reply *KvCommandReply) bool {
 	var ok bool
 	if getOrNot {
 		//ck.print("sending Get key %s to server %d", args.Key, server)
@@ -86,26 +77,6 @@ func (ck *Clerk) sendSingleCommand(getOrNot bool, server int, args *KvCommandArg
 	ck.print("server %d unreachable", server)
 	return false
 }
-
-/*
-func (ck *Clerk) sendCommandToAll(getOrNot bool, args *KvCommandArgs) (*KvCommandReply, int) {
-	replies := make([]KvCommandReply, len(ck.servers))
-	cond := sync.NewCond(&sync.Mutex{})
-	joinCount := 0
-	leader := -1
-	for i, _ := range ck.servers {
-		go ck.sendSingleCommand(getOrNot, i, args, &replies[i], cond, &joinCount, &leader)
-	}
-	cond.L.Lock()
-	defer cond.L.Unlock()
-	for !(joinCount >= len(ck.servers) || leader != -1) {
-		cond.Wait()
-	}
-	if leader == -1 {
-		return nil, -1
-	}
-	return &replies[leader], leader
-}*/
 
 const kvRpcWaitMs int = 20
 
@@ -173,29 +144,31 @@ func (ck *Clerk) sendCommandToLeader(getOrNot bool, args *KvCommandArgs) *KvComm
 		}
 	}
 	for {
-		//ck.print("opid %d try to send to all", args.OpId)
-		/*for i := 0; i < len(ck.servers); i++ {
-			reply := KvCommandReply{}
-			isLeader := ck.sendSingleCommand(getOrNot, i, args, &reply)
-			if isLeader {
-				ck.lastLeader = i
-				var cmdName string
-				if getOrNot {
-					cmdName = "Get"
-				} else {
-					cmdName = "PutAppend"
-				}
-				ck.print("opid %d %s replied %s at index %d term %d updated leader to %d", args.OpId, cmdName, reply.Err, reply.CommitIndex, reply.Term, ck.lastLeader)
-				return &reply
-			}
-		}*/
 		reply := ck.sendCommandToAll(getOrNot, args)
 		if reply != nil {
 			return reply
 		}
 		time.Sleep(time.Duration(kvRpcWaitMs) * time.Millisecond)
 	}
+}*/
+
+func leaderServerReachable(reply *KvCommandReply) bool {
+	if reply.Err == OK {
+		return true
+	}
+	if reply.Err == ErrNoKey {
+		return true
+	}
+	if reply.Err == ErrNotCommitted {
+		return true
+	}
+	if reply.Err == ErrWrongLeader {
+		return false
+	}
+	panic("undefined Err message")
 }
+
+const kvRpcRepeatWaitMs = 50
 
 //
 // fetch the current value for a key.
@@ -212,26 +185,33 @@ func (ck *Clerk) sendCommandToLeader(getOrNot bool, args *KvCommandArgs) *KvComm
 func (ck *Clerk) Get(key string) string {
 	// You will have to modify this function.
 	args := KvCommandArgs{
-		Key:  key,
-		Op:   GetCommand,
-		OpId: ck.opIdGenerator.make(),
-		MyId: ck.myId,
+		Key: key,
+		Op:  GetCommand,
 	}
-	ck.print("start sending Get key %s opid %d", args.Key, args.OpId)
+	ck.raftClerk.InitRpcArgs(&args)
+	ck.print("start sending Get key [%s] opid %d", args.Key, args.OpId)
 	var reply *KvCommandReply
 	for {
-		reply = ck.sendCommandToLeader(true, &args)
+		reply = ck.raftClerk.SendCommandToLeader(func(server int) raftservice.RpcReply {
+			localReply := &KvCommandReply{}
+			ck.sendGet(server, &args, localReply)
+			return localReply
+		}, func(rpcReply raftservice.RpcReply) bool {
+			ck.print("opid %d on key [%s] value [%s] replied", args.OpId, args.Key, args.Value)
+			return leaderServerReachable(rpcReply.(*KvCommandReply))
+		}, func() {}).(*KvCommandReply)
 		if reply.Err == OK || reply.Err == ErrNoKey {
 			break
 		}
-		if reply.Err == ErrWrongLeader {
+		if !reply.IsLeader {
 			panic("leader finding should be handled by sendCommandToLeader")
 		}
 		if reply.Err == ErrNotCommitted {
 			// try again
 		}
+		time.Sleep(time.Duration(kvRpcRepeatWaitMs) * time.Millisecond)
 	}
-	ck.print("Get key %s opid %d replied successfully", args.Key, args.OpId)
+	ck.print("Get key [%s] opid %d replied successfully", args.Key, args.OpId)
 	return reply.Value
 }
 
@@ -251,9 +231,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		Key:   key,
 		Value: value,
 		Op:    PutAppendCommand,
-		OpId:  ck.opIdGenerator.make(),
-		MyId:  ck.myId,
 	}
+	ck.raftClerk.InitRpcArgs(&args)
 	if op == "Put" {
 		args.Overwrite = true
 	} else if op == "Append" {
@@ -262,21 +241,28 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		ck.print("unknown op string %s, should only have Put or Append", op)
 		panic(1)
 	}
-	ck.print("start sending PutAppend key %s value %s overwrite %t opid %d", args.Key, args.Value, args.Overwrite, args.OpId)
+	ck.print("start sending PutAppend key [%s] value [%s] overwrite %t opid %d", args.Key, args.Value, args.Overwrite, args.OpId)
 	var reply *KvCommandReply
 	for {
-		reply = ck.sendCommandToLeader(false, &args)
+		reply = ck.raftClerk.SendCommandToLeader(func(server int) raftservice.RpcReply {
+			localReply := &KvCommandReply{}
+			ck.sendPutAppend(server, &args, localReply)
+			return localReply
+		}, func(rpcReply raftservice.RpcReply) bool {
+			ck.print("opid %d on key [%s] value [%s] replied", args.OpId, args.Key, args.Value)
+			return leaderServerReachable(rpcReply.(*KvCommandReply))
+		}, func() {}).(*KvCommandReply)
 		if reply.Err == OK || reply.Err == ErrNoKey {
 			break
 		}
-		if reply.Err == ErrWrongLeader {
+		if !reply.IsLeader {
 			panic("leader finding should be handled by sendCommandToLeader")
 		}
 		if reply.Err == ErrNotCommitted {
 			// try again
 		}
+		time.Sleep(time.Duration(kvRpcRepeatWaitMs) * time.Millisecond)
 	}
-	ck.print("PutAppend key %s val %s opid %d replied successfully %s", args.Key, args.Value, args.OpId, reply.Err)
 }
 
 func (ck *Clerk) Put(key string, value string) {

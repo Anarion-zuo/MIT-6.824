@@ -1,4 +1,4 @@
-package kvraft
+package raftservice
 
 import (
 	"github.com/sasha-s/go-deadlock"
