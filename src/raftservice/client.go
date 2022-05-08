@@ -24,7 +24,7 @@ type RaftClerk struct {
 func (ck *RaftClerk) Print(format string, vars ...interface{}) {
 	if ck.printFlag {
 		s := fmt.Sprintf(format, vars...)
-		fmt.Printf("rfclerk %d | %s\n", ck.myId, s)
+		fmt.Printf("rfclerk %d opid %d | %s\n", ck.myId, ck.opIdGenerator.curVal, s)
 	}
 }
 

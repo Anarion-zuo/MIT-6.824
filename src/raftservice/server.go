@@ -43,7 +43,7 @@ func (rs *RaftServer) Raft() *raft.Raft {
 func (rs *RaftServer) Print(format string, vars ...interface{}) {
 	if rs.printFlag {
 		s := fmt.Sprintf(format, vars...)
-		fmt.Printf("rfserver %d | %s\n", rs.me, s)
+		fmt.Printf("rfserver %d | %s", rs.me, s)
 	}
 }
 
