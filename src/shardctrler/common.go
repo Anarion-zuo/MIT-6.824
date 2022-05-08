@@ -28,6 +28,41 @@ type Config struct {
 	Groups map[int][]string // gid -> servers[]
 }
 
+type OpType int
+
+const (
+	OpJoin  OpType = 1
+	OpLeave OpType = 2
+	OpMove  OpType = 3
+	OpQuery OpType = 4
+)
+
+type Op struct {
+	// Your data here.
+	OpId int
+	MyId int
+
+	Type             OpType
+	JoinGIDMapping   map[int][]string
+	LeaveGIDs        []int
+	MoveShard        int
+	MoveGID          int
+	ConfigNum        int
+	QueryConfigIndex int
+}
+
+func (o Op) GetOpId() int {
+	return o.OpId
+}
+
+func (o Op) GetMyId() int {
+	return o.MyId
+}
+
+func (o Op) CannotRepeat() bool {
+	return o.Type != OpQuery
+}
+
 const (
 	OK = "OK"
 )
@@ -35,7 +70,8 @@ const (
 type Err string
 
 type JoinArgs struct {
-	Servers map[int][]string // new GID -> servers mappings
+	//Servers map[int][]string // new GID -> servers mappings
+	Op Op
 }
 
 type JoinReply struct {
@@ -44,7 +80,8 @@ type JoinReply struct {
 }
 
 type LeaveArgs struct {
-	GIDs []int
+	//GIDs []int
+	Op Op
 }
 
 type LeaveReply struct {
@@ -53,8 +90,9 @@ type LeaveReply struct {
 }
 
 type MoveArgs struct {
-	Shard int
-	GID   int
+	//Shard int
+	//GID   int
+	Op Op
 }
 
 type MoveReply struct {
@@ -63,11 +101,65 @@ type MoveReply struct {
 }
 
 type QueryArgs struct {
-	Num int // desired config number
+	//Num int // desired config number
+	Op Op
 }
 
 type QueryReply struct {
 	WrongLeader bool
 	Err         Err
 	Config      Config
+}
+
+type RpcArgs struct {
+	Op Op
+}
+
+func (r *RpcArgs) GetOpId() int {
+	return r.Op.OpId
+}
+
+func (r *RpcArgs) SetOpId(i int) {
+	r.Op.OpId = i
+}
+
+func (r *RpcArgs) GetMyId() int {
+	return r.Op.MyId
+}
+
+func (r *RpcArgs) SetMyId(i int) {
+	r.Op.MyId = i
+}
+
+type RpcReply struct {
+	WrongLeader bool
+	Err         Err
+	Config      Config
+
+	CommitIntex int
+	Term        int
+}
+
+func (r *RpcReply) GetCommitIndex() int {
+	return r.CommitIntex
+}
+
+func (r *RpcReply) SetCommitIndex(i int) {
+	r.CommitIntex = i
+}
+
+func (r *RpcReply) GetTerm() int {
+	return r.Term
+}
+
+func (r *RpcReply) SetTerm(i int) {
+	r.Term = i
+}
+
+func (r *RpcReply) GetIsLeader() bool {
+	return !r.WrongLeader
+}
+
+func (r *RpcReply) SetIsLeader(b bool) {
+	r.WrongLeader = !b
 }

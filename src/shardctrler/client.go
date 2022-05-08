@@ -4,14 +4,18 @@ package shardctrler
 // Shardctrler clerk.
 //
 
-import "6.824/labrpc"
+import (
+	"6.824/labrpc"
+	"6.824/raftservice"
+)
 import "time"
 import "crypto/rand"
 import "math/big"
 
 type Clerk struct {
-	servers []*labrpc.ClientEnd
+	//servers []*labrpc.ClientEnd
 	// Your data here.
+	raftClerk *raftservice.RaftClerk
 }
 
 func nrand() int64 {
@@ -21,80 +25,119 @@ func nrand() int64 {
 	return x
 }
 
+func (ck *Clerk) print(format string, vars ...interface{}) {
+	ck.raftClerk.Print("shardclerk | "+format, vars...)
+}
+
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
-	ck.servers = servers
+	//ck.servers = servers
 	// Your code here.
+	ck.raftClerk = raftservice.MakeRaftClerk(servers)
 	return ck
 }
 
+func (ck *Clerk) sendRpcCall(server int, args *RpcArgs, reply *RpcReply) {
+	ck.raftClerk.SendRpc(server, "ShardCtrler.RpcHandler", args, reply)
+}
+
 func (ck *Clerk) Query(num int) Config {
-	args := &QueryArgs{}
+	args := &RpcArgs{}
 	// Your code here.
-	args.Num = num
+	args.Op = Op{
+		Type:             OpQuery,
+		QueryConfigIndex: num,
+	}
+	ck.raftClerk.InitRpcArgs(args)
+	var reply *RpcReply
 	for {
-		// try each known server.
-		for _, srv := range ck.servers {
-			var reply QueryReply
-			ok := srv.Call("ShardCtrler.Query", args, &reply)
-			if ok && reply.WrongLeader == false {
-				return reply.Config
-			}
+		reply = ck.raftClerk.SendCommandToLeader(func(server int) raftservice.RpcReply {
+			localReply := &RpcReply{}
+			ck.sendRpcCall(server, args, localReply)
+			return localReply
+		}, func(rpcReply raftservice.RpcReply) bool {
+			reply := rpcReply.(*RpcReply)
+			ck.print("opid %d replied shards %v groups %v", args.Op.OpId, reply.Config.Shards, reply.Config.Groups)
+			return true
+		}, func() {}).(*RpcReply)
+		if reply.Err == OK {
+			return reply.Config
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 }
 
 func (ck *Clerk) Join(servers map[int][]string) {
-	args := &JoinArgs{}
+	args := &RpcArgs{}
 	// Your code here.
-	args.Servers = servers
-
+	args.Op = Op{
+		Type:           OpJoin,
+		JoinGIDMapping: servers,
+	}
+	ck.raftClerk.InitRpcArgs(args)
+	var reply *RpcReply
 	for {
-		// try each known server.
-		for _, srv := range ck.servers {
-			var reply JoinReply
-			ok := srv.Call("ShardCtrler.Join", args, &reply)
-			if ok && reply.WrongLeader == false {
-				return
-			}
+		reply = ck.raftClerk.SendCommandToLeader(func(server int) raftservice.RpcReply {
+			localReply := &RpcReply{}
+			ck.sendRpcCall(server, args, localReply)
+			return localReply
+		}, func(rpcReply raftservice.RpcReply) bool {
+			ck.print("opid %d replied", args.Op.OpId)
+			return true
+		}, func() {}).(*RpcReply)
+		if reply.Err == OK {
+			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 }
 
 func (ck *Clerk) Leave(gids []int) {
-	args := &LeaveArgs{}
+	args := &RpcArgs{}
 	// Your code here.
-	args.GIDs = gids
-
+	args.Op = Op{
+		Type:      OpLeave,
+		LeaveGIDs: gids,
+	}
+	ck.raftClerk.InitRpcArgs(args)
+	var reply *RpcReply
 	for {
-		// try each known server.
-		for _, srv := range ck.servers {
-			var reply LeaveReply
-			ok := srv.Call("ShardCtrler.Leave", args, &reply)
-			if ok && reply.WrongLeader == false {
-				return
-			}
+		reply = ck.raftClerk.SendCommandToLeader(func(server int) raftservice.RpcReply {
+			localReply := &RpcReply{}
+			ck.sendRpcCall(server, args, localReply)
+			return localReply
+		}, func(rpcReply raftservice.RpcReply) bool {
+			ck.print("opid %d replied", args.Op.OpId)
+			return true
+		}, func() {}).(*RpcReply)
+		if reply.Err == OK {
+			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 }
 
 func (ck *Clerk) Move(shard int, gid int) {
-	args := &MoveArgs{}
+	args := &RpcArgs{}
 	// Your code here.
-	args.Shard = shard
-	args.GID = gid
-
+	args.Op = Op{
+		Type:      OpMove,
+		MoveShard: shard,
+		MoveGID:   gid,
+	}
+	ck.raftClerk.InitRpcArgs(args)
+	var reply *RpcReply
 	for {
-		// try each known server.
-		for _, srv := range ck.servers {
-			var reply MoveReply
-			ok := srv.Call("ShardCtrler.Move", args, &reply)
-			if ok && reply.WrongLeader == false {
-				return
-			}
+		reply = ck.raftClerk.SendCommandToLeader(func(server int) raftservice.RpcReply {
+			localReply := &RpcReply{}
+			ck.sendRpcCall(server, args, localReply)
+			return localReply
+		}, func(rpcReply raftservice.RpcReply) bool {
+			ck.print("opid %d replied", args.Op.OpId)
+			return true
+		}, func() {}).(*RpcReply)
+		if reply.Err == OK {
+			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

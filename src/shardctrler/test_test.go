@@ -2,6 +2,7 @@ package shardctrler
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -9,10 +10,42 @@ import (
 
 // import "time"
 
+func runTestJoinAlgo(t *testing.T, shardCount int, groupCount []int, targetUneven float64, targetAssignment []int) {
+	maxpressure, uneven, assignment := computeAssignment(shardCount, groupCount)
+	flag := true
+	if math.Abs(targetUneven-uneven) > 1e-3 {
+		flag = false
+	} else if targetAssignment != nil {
+		if len(targetAssignment) != len(assignment) {
+			flag = false
+		} else {
+			for i := 0; i < len(assignment); i++ {
+				if assignment[i] != targetAssignment[i] {
+					flag = false
+					break
+				}
+			}
+		}
+	}
+	if !flag {
+		t.Fatalf("join failed for shardCount %d groupCount %v expecting %f %v got %f %f %v", shardCount, groupCount, targetUneven, targetAssignment, maxpressure, uneven, assignment)
+	}
+}
+
+func TestJoinAlgo(t *testing.T) {
+	runTestJoinAlgo(t, 2, []int{1, 1}, 0, []int{0, 1})
+	runTestJoinAlgo(t, 2, []int{1}, 0, []int{0, 0})
+	runTestJoinAlgo(t, 100, []int{1}, 0, nil)
+	runTestJoinAlgo(t, 2, []int{1, 1, 1}, 0, nil)
+	runTestJoinAlgo(t, 4, []int{2, 1, 1}, 0, []int{0, 0, 1, 2})
+	runTestJoinAlgo(t, 4, []int{3, 1}, 0, []int{0, 0, 0, 1})
+	runTestJoinAlgo(t, 4, []int{4}, 0, []int{0, 0, 0, 0})
+}
+
 func check(t *testing.T, groups []int, ck *Clerk) {
 	c := ck.Query(-1)
 	if len(c.Groups) != len(groups) {
-		t.Fatalf("wanted %v groups, got %v", len(groups), len(c.Groups))
+		t.Fatalf("wanted %v groups %v, got %v %v", len(groups), groups, len(c.Groups), c.Groups)
 	}
 
 	// are the groups as expected?
@@ -90,15 +123,18 @@ func TestBasic(t *testing.T) {
 	cfa := make([]Config, 6)
 	cfa[0] = ck.Query(-1)
 
+	fmt.Printf("tester: check for initial state\n")
 	check(t, []int{}, ck)
 
 	var gid1 int = 1
 	ck.Join(map[int][]string{gid1: []string{"x", "y", "z"}})
+	fmt.Printf("tester: check after joining x y z\n")
 	check(t, []int{gid1}, ck)
 	cfa[1] = ck.Query(-1)
 
 	var gid2 int = 2
 	ck.Join(map[int][]string{gid2: []string{"a", "b", "c"}})
+	fmt.Printf("tester: check after joining a b c\n")
 	check(t, []int{gid1, gid2}, ck)
 	cfa[2] = ck.Query(-1)
 
@@ -113,10 +149,12 @@ func TestBasic(t *testing.T) {
 	}
 
 	ck.Leave([]int{gid1})
+	fmt.Printf("tester: check after removing gid1 [x y z]\n")
 	check(t, []int{gid2}, ck)
 	cfa[4] = ck.Query(-1)
 
 	ck.Leave([]int{gid2})
+	fmt.Printf("tester: removed gid2 [a b c]\n")
 	cfa[5] = ck.Query(-1)
 
 	fmt.Printf("  ... Passed\n")
@@ -124,9 +162,11 @@ func TestBasic(t *testing.T) {
 	fmt.Printf("Test: Historical queries ...\n")
 
 	for s := 0; s < nservers; s++ {
+		fmt.Printf("tester: historical queries server %d\n", s)
 		cfg.ShutdownServer(s)
 		for i := 0; i < len(cfa); i++ {
 			c := ck.Query(cfa[i].Num)
+			fmt.Printf("tester: checking config index %d\n", cfa[i].Num)
 			check_same_config(t, c, cfa[i])
 		}
 		cfg.StartServer(s)
